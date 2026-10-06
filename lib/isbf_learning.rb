@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 require "uri"
+require "cgi"
 
 module IsbfLearning
   STORE = "isbf-learning"
   COURSE_FIELD = "isbf_learning_course_id"
   FILES_FIELD = "isbf_learning_files"
+  LINK_FIELD = "isbf_learning_link"
   GRADES = (1..4).map { |id| { id: id, label: %w[大一 大二 大三 大四][id - 1] } }.freeze
   class StorageError < StandardError; end
 
@@ -48,11 +50,35 @@ module IsbfLearning
     end.uniq.first(20)
   end
 
+  def self.external_link(value)
+    unless value.is_a?(String) && value.length.between?(1, 2048) &&
+             !value.match?(/[\\\s\x00-\x20<>]/)
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_link"))
+    end
+    uri = URI.parse(value)
+    unless %w[http https].include?(uri.scheme&.downcase) && uri.host.present? &&
+             !uri.userinfo && !uri.host.casecmp?(Discourse.current_hostname)
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_link"))
+    end
+    value
+  rescue URI::InvalidURIError
+    raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_link"))
+  end
+
+  def self.link_body(title, link)
+    label = CGI.escapeHTML(title).gsub(/[\\\[\]]/) { |character| "\\#{character}" }
+    "[#{label}](<#{link}>)"
+  end
+
   def self.validate_payload!(user, options)
     ensure_can_submit!(user, Guardian.new(user))
     course = Courses.find(options[COURSE_FIELD.to_sym])
     ids = file_ids(options[FILES_FIELD.to_sym])
     raw = options[:raw].to_s
+    if options[LINK_FIELD.to_sym].present?
+      external_link(options[LINK_FIELD.to_sym])
+      raise Discourse::InvalidParameters.new(FILES_FIELD) unless ids.empty?
+    end
     if !course || options[:title].to_s.strip.blank? || options[:title].to_s.include?("[isbf-untitled:") || options[:archetype] == Archetype.private_message ||
          options[:isbf_anonymous] || raw.match?(%r{(?:upload://|/uploads/)}i) ||
          (ids.empty? && links(raw).empty?)
@@ -102,16 +128,17 @@ module IsbfLearning
     course = Courses.find(topic.custom_fields[COURSE_FIELD])
     return unless course && visible_resource?(topic, guardian)
     post = topic.first_post
+    link = topic.custom_fields[LINK_FIELD].presence
     files = file_ids(topic.custom_fields[FILES_FIELD] || []).filter_map do |id|
       file = Files.metadata(id)
       file&.slice(:id, :name, :size, :url)
     end
     {
       id: topic.id, title: topic.title, url: topic.relative_url,
-      description: PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true),
+      description: link ? "" : PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true),
       created_at: post.created_at, grade: course["grade"], course: course,
       author: { username: post.user.username, name: post.user.name, avatar_template: post.user.avatar_template },
-      files: files, links: links(post.raw),
+      files: files, links: link ? [external_link(link)] : links(post.raw), link_only: link.present?,
     }
   end
 end

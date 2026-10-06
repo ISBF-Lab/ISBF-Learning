@@ -58,6 +58,34 @@ module IsbfLearning
       render json: { resources: topics.filter_map { |topic| IsbfLearning.resource(topic, guardian) }, has_more: !!more }
     end
 
+    def create_resource
+      IsbfLearning.ensure_can_submit!(current_user, guardian)
+      RateLimiter.new(current_user, "isbf-learning-share", 10, 1.minute).performed!
+      link = IsbfLearning.external_link(params[:link])
+      title = params[:title].is_a?(String) ? params[:title].strip : ""
+      options = {
+        title: title,
+        raw: IsbfLearning.link_body(title, link),
+        category: IsbfLearning.category_id,
+        archetype: Archetype.default,
+        isbf_learning_course_id: params[:course_id],
+        isbf_learning_files: "[]",
+        isbf_learning_link: link,
+      }
+      IsbfLearning.validate_payload!(current_user, options)
+      creator = TopicCreator.new(current_user, guardian, options)
+      return render_json_error(creator.errors.full_messages, status: 422) unless creator.valid?
+      result = NewPostManager.new(current_user, options).perform
+      return render_json_error(result.errors.full_messages, status: 422) unless result.success?
+      render json: {
+        success: true,
+        pending: result.reviewable.present? && result.post.nil?,
+        resource: result.post && IsbfLearning.resource(result.post.topic, guardian),
+      }
+    rescue Discourse::InvalidParameters => error
+      render_json_error(error.message, status: 422)
+    end
+
     def upload
       render json: Files.upload(current_user, guardian, params[:file] || params[:files]&.first)
     rescue StorageError => error
