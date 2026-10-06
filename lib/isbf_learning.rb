@@ -1,0 +1,120 @@
+# frozen_string_literal: true
+
+require "uri"
+
+module IsbfLearning
+  STORE = "isbf-learning"
+  COURSE_FIELD = "isbf_learning_course_id"
+  FILES_FIELD = "isbf_learning_files"
+  GRADES = (1..4).map { |id| { id: id, label: %w[大一 大二 大三 大四][id - 1] } }.freeze
+  class StorageError < StandardError; end
+
+  def self.category_id
+    id = SiteSetting.isbf_learning_category_id.to_i
+    id if id.positive? && Category.exists?(id: id)
+  end
+
+  def self.learning_topic?(topic)
+    category_id && topic&.category_id == category_id && !topic.private_message?
+  end
+
+  def self.ensure_can_submit!(user, guardian)
+    category = Category.find_by(id: category_id)
+    unless SiteSetting.isbf_learning_enabled && user&.active? && (user.staff? || user.approved?) &&
+             !user.silenced? && !user.suspended? && category &&
+             guardian.can_create_topic_on_category?(category)
+      raise Discourse::InvalidAccess
+    end
+  end
+
+  def self.file_ids(value)
+    ids = value.is_a?(String) ? JSON.parse(value) : value
+    unless ids.is_a?(Array) && ids.length <= 20 && ids.uniq == ids &&
+             ids.all? { |id| id.is_a?(String) && Files.valid_id?(id) }
+      raise Discourse::InvalidParameters.new(FILES_FIELD)
+    end
+    ids
+  rescue JSON::ParserError
+    raise Discourse::InvalidParameters.new(FILES_FIELD)
+  end
+
+  def self.links(raw)
+    URI.extract(raw.to_s, %w[http https]).filter_map do |value|
+      value = value.sub(/[)\]>.,，。]+\z/, "")
+      uri = URI.parse(value)
+      value if uri.host.present? && !uri.userinfo && uri.host != Discourse.current_hostname
+    rescue URI::InvalidURIError
+      nil
+    end.uniq.first(20)
+  end
+
+  def self.validate_payload!(user, options)
+    ensure_can_submit!(user, Guardian.new(user))
+    course = Courses.find(options[COURSE_FIELD.to_sym])
+    ids = file_ids(options[FILES_FIELD.to_sym])
+    raw = options[:raw].to_s
+    if !course || options[:title].to_s.strip.blank? || options[:title].to_s.include?("[isbf-untitled:") || options[:archetype] == Archetype.private_message ||
+         options[:isbf_anonymous] || raw.match?(%r{(?:upload://|/uploads/)}i) ||
+         (ids.empty? && links(raw).empty?)
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid"))
+    end
+    referenced = raw.scan(%r{/isbf/learning/files/([0-9a-f-]{36})}).flatten.uniq
+    raise Discourse::InvalidParameters.new(FILES_FIELD) unless (referenced - ids).empty?
+    ids.each do |id|
+      file = Files.metadata(id)
+      unless file && (user.staff? || file[:owner_id] == user.id) &&
+               file_accessible?(id, user, Guardian.new(user))
+        raise Discourse::InvalidAccess
+      end
+    end
+    [course, ids]
+  end
+
+  def self.visible_resource?(topic, guardian)
+    return false unless guardian.user && learning_topic?(topic) && topic.visible &&
+                        !topic.deleted_at && guardian.can_see_topic?(topic)
+    post = topic.first_post
+    post && post.post_type == Post.types[:regular] && !post.deleted_at && !post.user_deleted &&
+      !post.hidden? && guardian.can_see_post?(post) &&
+      !(defined?(IsbfModeration::Hold) && IsbfModeration::Hold.persisted?(post))
+  end
+
+  def self.file_accessible?(id, user, guardian)
+    return false unless user
+    file = Files.metadata(id)
+    return false unless file
+    # Existing topic references take precedence over ownership and stale queues.
+    references = Topic.with_deleted.joins(:_custom_fields).where(
+      topic_custom_fields: { name: FILES_FIELD },
+    ).where("topic_custom_fields.value LIKE ?", "%#{id}%").distinct
+    if references.exists?
+      return references.any? { |topic| visible_resource?(topic, guardian) }
+    end
+    return false if file[:bound]
+    pending = ReviewableQueuedPost.pending.where(category_id: category_id).where(
+      "payload ->> ? LIKE ?", FILES_FIELD, "%#{id}%",
+    )
+    return user.staff? || pending.where(target_created_by_id: user.id).exists? if pending.exists?
+    user.staff? || file[:owner_id] == user.id
+  end
+
+  def self.resource(topic, guardian)
+    course = Courses.find(topic.custom_fields[COURSE_FIELD])
+    return unless course && visible_resource?(topic, guardian)
+    post = topic.first_post
+    files = file_ids(topic.custom_fields[FILES_FIELD] || []).filter_map do |id|
+      file = Files.metadata(id)
+      file&.slice(:id, :name, :size, :url)
+    end
+    {
+      id: topic.id, title: topic.title, url: topic.relative_url,
+      description: PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true),
+      created_at: post.created_at, grade: course["grade"], course: course,
+      author: { username: post.user.username, name: post.user.name, avatar_template: post.user.avatar_template },
+      files: files, links: links(post.raw),
+    }
+  end
+end
+
+require_relative "isbf_learning/courses"
+require_relative "isbf_learning/files"

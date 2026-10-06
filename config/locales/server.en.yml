@@ -1,0 +1,9 @@
+en:
+  site_settings:
+    isbf_learning_enabled: "Enable the ISBF learning resource library."
+    isbf_learning_category_id: "Authenticated learning resource category ID."
+    isbf_learning_storage_limit_mb: "Maximum private learning file storage in MiB."
+  isbf_learning:
+    invalid: "Select a valid course and supply a title and at least one protected file or external link."
+    duplicate_course: "This course already exists in the selected year."
+    storage_error: "The private file could not be saved. Check the storage quota or try again."

@@ -1,0 +1,9 @@
+zh_CN:
+  site_settings:
+    isbf_learning_enabled: "启用学习资源库。"
+    isbf_learning_category_id: "仅登录用户可访问的学习资源分类 ID。"
+    isbf_learning_storage_limit_mb: "学习资源私有文件总容量上限（MiB）。"
+  isbf_learning:
+    invalid: "请选择有效课程，填写标题，并添加至少一个资料文件或外部链接。"
+    duplicate_course: "该年级已存在同名课程。"
+    storage_error: "文件未能保存，请检查存储额度或重试。"
