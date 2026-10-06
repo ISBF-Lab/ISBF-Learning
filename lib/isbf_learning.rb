@@ -53,7 +53,7 @@ module IsbfLearning
     course = Courses.find(options[COURSE_FIELD.to_sym])
     ids = file_ids(options[FILES_FIELD.to_sym])
     raw = options[:raw].to_s
-    if !course || options[:title].to_s.strip.blank? || options[:archetype] == Archetype.private_message ||
+    if !course || options[:title].to_s.strip.blank? || options[:title].to_s.include?("[isbf-untitled:") || options[:archetype] == Archetype.private_message ||
          options[:isbf_anonymous] || raw.match?(%r{(?:upload://|/uploads/)}i) ||
          (ids.empty? && links(raw).empty?)
       raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid"))
@@ -90,6 +90,7 @@ module IsbfLearning
     if references.exists?
       return references.any? { |topic| visible_resource?(topic, guardian) }
     end
+    return false if file[:bound]
     pending = ReviewableQueuedPost.pending.where(category_id: category_id).where(
       "payload ->> ? LIKE ?", FILES_FIELD, "%#{id}%",
     )

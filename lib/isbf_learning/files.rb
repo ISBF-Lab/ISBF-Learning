@@ -6,7 +6,7 @@ require "tempfile"
 
 module IsbfLearning
   module Files
-    MAX_STORAGE_BYTES = 512 * 1024 * 1024
+    MAX_STORAGE_BYTES = 2048 * 1024 * 1024
     CHUNK_BYTES = 64 * 1024
     UUID = /\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/
     QUOTA_KEY = "storage-bytes"
@@ -48,8 +48,17 @@ module IsbfLearning
           name: row["name"],
           size: row["size"],
           owner_id: row["owner_id"],
+          bound: row["bound"] == true,
           url: "/isbf/learning/files/#{id}",
         }
+      end
+
+      def mark_bound!(id)
+        path(id)
+        row = PluginStoreRow.lock.find_by!(plugin_name: IsbfLearning::STORE, key: "file:#{id}")
+        metadata = PluginStore.cast_value(row.type_name, row.value)
+        metadata["bound"] = true
+        raise IsbfLearning::StorageError, "Could not bind private file" unless PluginStore.set(IsbfLearning::STORE, "file:#{id}", metadata)
       end
 
       def download(id, user, guardian)
@@ -138,7 +147,7 @@ module IsbfLearning
       end
 
       def validate!(user, name, size)
-        upload = Upload.new(user: user, original_filename: name, filesize: size)
+        upload = Upload.new(user: user, original_filename: name, filesize: size, validate_file_size: true)
         unless upload.valid? && size.positive?
           message = upload.errors.full_messages.join("; ").presence || "The file is empty"
           raise IsbfLearning::StorageError, message

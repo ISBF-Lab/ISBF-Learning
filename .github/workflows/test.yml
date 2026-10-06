@@ -11,7 +11,7 @@ jobs:
       name: isbf-learning
       skip_linting: true
       skip_annotations: true
-      core_ref: 1575e9c1de2ae36bd1a2bbf34371029fa3c751dc
+      core_ref: f18a1985b22e5d4c0a0fffd6f91812105467afdb
   syntax:
     runs-on: ubuntu-latest
     steps:

@@ -46,7 +46,7 @@ after_initialize do
         !user.silenced? && !user.suspended? && Category.topic_create_allowed(self).exists?(id: id)
     end
 
-    def can_see_topic?(topic)
+    def can_see_topic?(topic, hide_deleted = true)
       return false if IsbfLearning.learning_topic?(topic) && !user
       super
     end
@@ -82,7 +82,15 @@ after_initialize do
       fields = fields.reject do |key, value|
         value.nil? && [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD].include?(key.to_s)
       end
-      super(editor, fields, opts, &block)
+      PluginStoreRow.transaction do
+        result = super(editor, fields, opts, &block)
+        if result && IsbfLearning.learning_topic?(@post.topic) && @post.is_first_post?
+          IsbfLearning.file_ids(@post.topic.custom_fields[IsbfLearning::FILES_FIELD] || []).each do |id|
+            IsbfLearning::Files.mark_bound!(id)
+          end
+        end
+        result
+      end
     end
   end
   PostRevisor.prepend(IsbfLearning::ResourceRevisor)
@@ -95,7 +103,16 @@ after_initialize do
     begin
       raise Discourse::InvalidParameters.new("isbf_learning") unless resource
       IsbfLearning.validate_payload!(manager.user, manager.args)
-      manager.enqueue(:category) unless manager.user.staff?
+      unless manager.user.staff?
+        post = Post.new(raw: manager.args[:raw], user: manager.user, post_number: 1)
+        PostValidator.new(skip_topic: true).validate(post)
+        if post.errors.present?
+          result = NewPostResult.new(:created_post, false)
+          result.errors.add(:base, post.errors.full_messages)
+          next result
+        end
+        manager.enqueue(:category)
+      end
     rescue Discourse::InvalidParameters, Discourse::InvalidAccess => error
       result = NewPostResult.new(:create_post, false)
       result.errors.add(:base, I18n.t("isbf_learning.invalid"))
@@ -113,13 +130,17 @@ after_initialize do
   end
 
   on(:before_create_topic) do |topic, creator|
-    next unless IsbfLearning.learning_topic?(topic) && !creator.user.is_system_user?
+    next if creator.user.is_system_user?
+    supplied = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD].any? { |field| creator.opts[field.to_sym].present? }
+    next unless supplied || IsbfLearning.learning_topic?(topic)
+    raise Discourse::InvalidParameters.new("isbf_learning") unless IsbfLearning.learning_topic?(topic)
     unless creator.user.staff? || creator.opts[:reviewed_queued_post]
       raise Discourse::InvalidAccess
     end
     course, files = IsbfLearning.validate_payload!(creator.user, creator.opts)
     topic.custom_fields[IsbfLearning::COURSE_FIELD] = course["id"]
     topic.custom_fields[IsbfLearning::FILES_FIELD] = files
+    files.each { |id| IsbfLearning::Files.mark_bound!(id) }
   end
 
   add_to_serializer(:site, :isbf_learning, include_condition: -> { SiteSetting.isbf_learning_enabled && IsbfLearning.category_id }) do

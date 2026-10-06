@@ -1,6 +1,6 @@
 # ISBF Learning
 
-Discourse 学习资源库插件。课程与资源入口为 `/learning`，主题、回复、审核和搜索复用 Discourse。课程按大一至大四归类，由 staff 添加；已登录成员可以阅读资源并提交材料。普通成员的提交进入原生审核队列，staff 可直接发布。审核通过后，普通作者不能修改资源首帖，staff 可通过原生编辑功能维护内容。
+Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，主题、回复、审核和搜索复用 Discourse。课程按大一至大四归类，由 staff 添加；已登录成员可以阅读资源并提交材料。普通成员的提交进入原生审核队列，staff 可直接发布。审核通过后，普通作者不能修改资源首帖，staff 可通过原生编辑功能维护内容。
 
 ## 配置与数据
 
@@ -30,7 +30,7 @@ Discourse 学习资源库插件。课程与资源入口为 `/learning`，主题�
 
 ## 验证
 
-GitHub Actions 通过 Discourse 官方插件测试工作流执行 Rails RSpec，Core 固定为已部署版本 `1575e9c1de2ae36bd1a2bbf34371029fa3c751dc`。另有 Ruby 语法检查。CI 需要官方工作流提供的 Ruby、PostgreSQL、Redis 和 Discourse 测试依赖；这是独立测试 checkout，不是已有服务器容器。
+GitHub Actions 通过 Discourse 官方插件测试工作流执行 Rails RSpec，Core 固定为可获取的上游提交 `f18a1985b22e5d4c0a0fffd6f91812105467afdb`。当前域名站点的自有 Core 提交 `403bce2f3c83711a5f2891eef0b82d6941e5ae5c` 无法从官方仓库获取，因此此 CI 不等同于该站点的运行回归。另有 Ruby 语法检查。CI 需要官方工作流提供的 Ruby、PostgreSQL、Redis 和 Discourse 测试依赖；这是独立测试 checkout，不是已有服务器容器。
 
 可在该 Core 的独立测试 checkout 中运行：
 

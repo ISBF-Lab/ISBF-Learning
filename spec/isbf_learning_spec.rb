@@ -63,6 +63,47 @@ RSpec.describe "ISBF learning native posting" do
     end
   end
 
+  it "preserves Guardian's explicit hide_deleted argument while protecting guest access" do
+    topic = publish_resource.topic
+    [true, false].each do |hide_deleted|
+      expect(Guardian.new(member).can_see_topic?(topic, hide_deleted)).to eq(true)
+      expect(Guardian.new.can_see_topic?(topic, hide_deleted)).to eq(false)
+    end
+    topic.update!(deleted_at: Time.zone.now)
+    expect(Guardian.new(member).can_see_topic?(topic, true)).to eq(false)
+    expect(Guardian.new(member).can_see_topic?(topic, false)).to eq(true)
+  end
+
+  it "rejects overlong resource bodies before creating a reviewable" do
+    SiteSetting.max_post_length = 1000
+    payload = resource_payload(raw: "#{'x' * 1001} https://example.org/course-notes.pdf")
+    expect do
+      result = NewPostManager.new(member, payload).perform
+      expect(result.success?).to eq(false)
+      expect(result.post).to be_nil
+    end.not_to change(ReviewableQueuedPost, :count)
+  end
+
+  it "rejects approval after a queued resource is moved to an ordinary category" do
+    result = NewPostManager.new(member, resource_payload).perform
+    expect(result.action).to eq(:enqueued)
+    reviewable = result.reviewable
+    other = Fabricate(:category)
+    reviewable.update!(category_id: other.id)
+    approval = nil
+    expect do
+      expect do
+        begin
+          approval = reviewable.perform(admin, :approve_post)
+        rescue Discourse::InvalidAccess, Discourse::InvalidParameters
+          # Core callers may receive a permission exception or a failed action.
+        end
+      end.not_to change(Post, :count)
+    end.not_to change(Topic, :count)
+    expect(approval.success?).to eq(false) if approval
+    expect(reviewable.reload.pending?).to eq(true)
+  end
+
   it "permits resource-only TL0 submission without changing global topic creation groups" do
     SiteSetting.create_topic_allowed_groups = "1|2"
     other = Fabricate(:category)
@@ -201,6 +242,31 @@ RSpec.describe "ISBF learning native posting" do
     category.set_permissions(staff: :full)
     category.save!
     expect(IsbfLearning.file_accessible?(id, member, Guardian.new(member))).to eq(false)
+  end
+
+  it "does not restore owner download access after permanently deleting a file resource" do
+    id = SecureRandom.uuid
+    PluginStore.set("isbf-learning", "file:#{id}", { "name" => "notes.pdf", "size" => 10, "owner_id" => member.id })
+    result = NewPostManager.new(member, resource_payload(
+      raw: "[Private course notes](/isbf/learning/files/#{id})",
+      isbf_learning_files: [id].to_json,
+    )).perform
+    expect(result.success?).to eq(true), result.errors.full_messages.join(", ")
+    post = result.reviewable.perform(admin, :approve_post).created_post
+    topic_id = post.topic_id
+    expect(IsbfLearning.file_accessible?(id, member, Guardian.new(member))).to eq(true)
+    expect(IsbfLearning.file_accessible?(id, new_member, Guardian.new(new_member))).to eq(true)
+
+    PostDestroyer.new(admin, post, force_destroy: true).destroy
+
+    expect(Topic.with_deleted.exists?(topic_id)).to eq(false)
+    expect(TopicCustomField.where(topic_id: topic_id, name: "isbf_learning_files")).to be_empty
+    [member, new_member].each do |actor|
+      expect(IsbfLearning.file_accessible?(id, actor, Guardian.new(actor))).to eq(false)
+      expect do
+        IsbfLearning::Files.download(id, actor, Guardian.new(actor))
+      end.to raise_error(Discourse::InvalidAccess)
+    end
   end
 end
 
