@@ -42,8 +42,9 @@ after_initialize do
     def can_create_topic_on_category?(category)
       id = category.is_a?(Category) ? category.id : category
       return super unless IsbfLearning.category_id && id.to_i == IsbfLearning.category_id
-      SiteSetting.isbf_learning_enabled && user&.active? && user.approved? &&
-        !user.silenced? && !user.suspended? && Category.topic_create_allowed(self).exists?(id: id)
+      SiteSetting.isbf_learning_enabled && user&.active? && (user.staff? || user.approved?) &&
+        !user.silenced? && !user.suspended? &&
+        (is_admin? || Category.topic_create_allowed(self).exists?(id: id))
     end
 
     def can_see_topic?(topic, hide_deleted = true)
@@ -62,6 +63,13 @@ after_initialize do
     end
   end
   Guardian.prepend(IsbfLearning::ResourceGuardian)
+
+  on(:before_upload_creation) do |_file, image, upload, _validate|
+    id = File.basename(upload.original_filename.to_s, File.extname(upload.original_filename.to_s))
+    if image && IsbfLearning::Files.valid_id?(id) && IsbfLearning::Files.metadata(id)
+      upload.errors.add(:base, I18n.t("isbf_learning.invalid"))
+    end
+  end
 
   module ::IsbfLearning::ResourceRevisor
     def revise!(editor, fields, opts = {}, &block)

@@ -20,7 +20,7 @@ module IsbfLearning
 
   def self.ensure_can_submit!(user, guardian)
     category = Category.find_by(id: category_id)
-    unless SiteSetting.isbf_learning_enabled && user&.active? && user.approved? &&
+    unless SiteSetting.isbf_learning_enabled && user&.active? && (user.staff? || user.approved?) &&
              !user.silenced? && !user.suspended? && category &&
              guardian.can_create_topic_on_category?(category)
       raise Discourse::InvalidAccess
