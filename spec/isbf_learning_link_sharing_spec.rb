@@ -190,7 +190,8 @@ RSpec.describe "ISBF learning link sharing", type: :request do
   it "denies submission when disabled or when the category denies creation" do
     SiteSetting.isbf_learning_enabled = false
     submit_link(member)
-    expect(response.status).to eq(403), response.body
+    expect(response.status).to eq(404), response.body
+    expect(ReviewableQueuedPost.count).to eq(0)
     SiteSetting.isbf_learning_enabled = true
     category.set_permissions(trust_level_0: :readonly, staff: :full)
     category.save!
