@@ -20,3 +20,4 @@ jobs:
         with:
           ruby-version: '3.3'
       - run: find . -name '*.rb' -not -path './.git/*' -print0 | xargs -0 -n1 ruby -c
+      - run: bash -n deploy/install-plugin.sh
