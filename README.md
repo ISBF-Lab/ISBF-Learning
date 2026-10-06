@@ -18,7 +18,11 @@ Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，�
 
 `GET /isbf/learning/resources` 接受 `course_id`、`page` 和 `q`，返回 `resources` 与 `has_more`。普通列表按课程查询；有 `q` 时使用 Core Search 搜索资源库全部年级与课程，忽略当前课程筛选。两种查询均仅覆盖配置资源分类内当前用户可以访问的已发布资源。
 
-发布复用原生 `POST /posts`，传入 `title`、`raw`、`category`、`isbf_learning_course_id`（课程 UUID 字符串）和 `isbf_learning_files`（附件 UUID 数组的 JSON 字符串）。资源字段只能用于资源分类的新主题，不能附到其他分类、回复或私信。原生登录、CSRF、校验、审核和 staff 管理流程继续生效。
+新的分享窗口只填写标题和一个外部链接，使用 `POST /isbf/learning/resources`，参数为 `course_id`、`title`、`link`。课程沿用页面当前选项。接口固定学习分类，不接受正文、标签、附件或其他话题参数；外链必须是完整 HTTP(S) 地址，最多 2048 字符，不接受本站链接、内嵌凭据或空白字符。返回 `success`、`pending` 和已发布的 `resource`；普通成员先进入原生 Reviewable，审核通过前不会出现资料卡片。
+
+服务端仍使用原生 NewPostManager、Topic/Post 和审核流程。新资料额外保存 `isbf_learning_link`，审核 payload 保留此字段，卡片标题直接打开链接，不重复显示内部正文。原生主题标题校验继续生效。历史附件资料与原生 staff 编辑功能保留，原有 `POST /posts` 的资源字段仍受分类、身份、附件权限和审核限制。
+
+配置的学习分类从 TopicQuery 默认查询中排除，包含最新、热门、排行榜、筛选及直接分类列表，普通成员和 staff 均适用。资料库使用自己的受权限控制的列表和限定范围的原生搜索；已有资料也不会出现在首页、探索或右栏最近讨论。审核队列、直接主题读取及全站搜索不因该列表排除而改变。
 
 ## 附件保护与备份
 

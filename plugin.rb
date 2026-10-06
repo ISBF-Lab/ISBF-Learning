@@ -2,7 +2,7 @@
 
 # name: isbf-learning
 # about: Authenticated learning resources with native moderation and private files.
-# version: 0.1.0
+# version: 0.2.0
 # authors: ISBF Lab
 # url: https://github.com/ISBF-Lab/ISBF-Learning
 # required_version: 3.2.0
@@ -13,7 +13,8 @@ after_initialize do
   require_relative "lib/isbf_learning"
   require_relative "lib/isbf_learning/controllers"
 
-  { IsbfLearning::COURSE_FIELD => :string, IsbfLearning::FILES_FIELD => :json }.each do |field, type|
+  { IsbfLearning::COURSE_FIELD => :string, IsbfLearning::FILES_FIELD => :json,
+    IsbfLearning::LINK_FIELD => :string }.each do |field, type|
     register_topic_custom_field_type(field, type, max_length: 4096)
     add_permitted_post_create_param(field.to_sym, :string)
     NewPostManager.add_plugin_payload_attribute(field.to_sym)
@@ -24,6 +25,7 @@ after_initialize do
         raise Discourse::InvalidAccess
       end
       normalized = field == IsbfLearning::FILES_FIELD ? IsbfLearning.file_ids(value) : value.to_s
+      normalized = IsbfLearning.external_link(normalized) if field == IsbfLearning::LINK_FIELD
       if field == IsbfLearning::COURSE_FIELD && !IsbfLearning::Courses.find(normalized)
         raise Discourse::InvalidParameters.new(field)
       end
@@ -81,14 +83,15 @@ after_initialize do
           category: fields[:category_id] || @post.topic.category_id,
           isbf_learning_course_id: fields[IsbfLearning::COURSE_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::COURSE_FIELD],
           isbf_learning_files: fields[IsbfLearning::FILES_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::FILES_FIELD],
+          isbf_learning_link: fields[IsbfLearning::LINK_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::LINK_FIELD],
         }
         raise Discourse::InvalidParameters.new("category_id") unless payload[:category].to_i == IsbfLearning.category_id
         IsbfLearning.validate_payload!(editor, payload)
-      elsif fields.any? { |key, value| [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD].include?(key.to_s) && !value.nil? }
+      elsif fields.any? { |key, value| [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD, IsbfLearning::LINK_FIELD].include?(key.to_s) && !value.nil? }
         raise Discourse::InvalidParameters.new("isbf_learning")
       end
       fields = fields.reject do |key, value|
-        value.nil? && [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD].include?(key.to_s)
+        value.nil? && [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD, IsbfLearning::LINK_FIELD].include?(key.to_s)
       end
       PluginStoreRow.transaction do
         result = super(editor, fields, opts, &block)
@@ -104,7 +107,7 @@ after_initialize do
   PostRevisor.prepend(IsbfLearning::ResourceRevisor)
 
   NewPostManager.add_handler(-100) do |manager|
-    fields = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD]
+    fields = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD, IsbfLearning::LINK_FIELD]
     supplied = fields.any? { |field| manager.args[field.to_sym].present? }
     resource = manager.args[:category].to_i == IsbfLearning.category_id && manager.args[:topic_id].blank?
     next unless supplied || resource
@@ -130,7 +133,7 @@ after_initialize do
 
   on(:before_create_post) do |post, options|
     next if post.user&.is_system_user?
-    supplied = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD].any? { |field| options[field.to_sym].present? }
+    supplied = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD, IsbfLearning::LINK_FIELD].any? { |field| options[field.to_sym].present? }
     resource = options[:category].to_i == IsbfLearning.category_id && options[:topic_id].blank?
     next unless supplied || resource
     raise Discourse::InvalidParameters.new("isbf_learning") unless resource
@@ -139,7 +142,7 @@ after_initialize do
 
   on(:before_create_topic) do |topic, creator|
     next if creator.user.is_system_user?
-    supplied = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD].any? { |field| creator.opts[field.to_sym].present? }
+    supplied = [IsbfLearning::COURSE_FIELD, IsbfLearning::FILES_FIELD, IsbfLearning::LINK_FIELD].any? { |field| creator.opts[field.to_sym].present? }
     next unless supplied || IsbfLearning.learning_topic?(topic)
     raise Discourse::InvalidParameters.new("isbf_learning") unless IsbfLearning.learning_topic?(topic)
     unless creator.user.staff? || creator.opts[:reviewed_queued_post]
@@ -148,11 +151,19 @@ after_initialize do
     course, files = IsbfLearning.validate_payload!(creator.user, creator.opts)
     topic.custom_fields[IsbfLearning::COURSE_FIELD] = course["id"]
     topic.custom_fields[IsbfLearning::FILES_FIELD] = files
+    if creator.opts[IsbfLearning::LINK_FIELD.to_sym].present?
+      topic.custom_fields[IsbfLearning::LINK_FIELD] = IsbfLearning.external_link(creator.opts[IsbfLearning::LINK_FIELD.to_sym])
+    end
     files.each { |id| IsbfLearning::Files.mark_bound!(id) }
   end
 
   add_to_serializer(:site, :isbf_learning, include_condition: -> { SiteSetting.isbf_learning_enabled && IsbfLearning.category_id }) do
-    { category_id: IsbfLearning.category_id, grades: IsbfLearning::GRADES }
+    { category_id: IsbfLearning.category_id, grades: IsbfLearning::GRADES, link_sharing: true }
+  end
+
+  TopicQuery.add_custom_filter(:isbf_learning_community_exclusion) do |topics, _query|
+    id = IsbfLearning.category_id
+    id ? topics.where.not(topics: { category_id: id }) : topics
   end
 
   register_search_advanced_filter(/\Aisbf-learning:library\z/) do |posts, _|
@@ -165,6 +176,7 @@ after_initialize do
     get "/courses" => "library#courses"
     post "/courses" => "library#create_course"
     get "/resources" => "library#resources"
+    post "/resources" => "library#create_resource"
     post "/uploads" => "library#upload"
     get "/files/:id" => "library#download"
   end
