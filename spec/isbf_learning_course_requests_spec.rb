@@ -258,5 +258,3 @@ RSpec.describe "ISBF learning course requests", type: :request do
     expect(sequence).to eq([:locked, :native_transaction_returned, :unlocking])
   end
 end
-
-
