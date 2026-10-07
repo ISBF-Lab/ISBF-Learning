@@ -299,8 +299,10 @@ RSpec.describe "ISBF learning HTTP permissions", type: :request do
     get "/isbf/learning/courses.json"
     expect(response.status).to eq(200), response.body
     expect(response.parsed_body.fetch("courses")).to include(created)
-    post "/isbf/learning/courses.json", params: { name: "Forbidden course", grade: 1 }
-    expect(response.status).to eq(403)
+    post "/isbf/learning/courses.json", params: { name: "Requested course", grade: 1 }
+    expect(response.status).to eq(200), response.body
+    expect(response.parsed_body.fetch("pending")).to eq(true)
+    expect(IsbfLearning::Courses.list.map { |item| item["name"] }).not_to include("Requested course")
   end
 
   it "rejects duplicate course names within a grade and grades outside 1 through 4" do
