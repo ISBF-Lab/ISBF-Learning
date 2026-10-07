@@ -209,9 +209,17 @@ RSpec.describe "ISBF learning course requests", type: :request do
   it "rolls back native review state when catalog persistence fails" do
     reviewable = request_course
     original_version = reviewable.version
-    allow(PluginStore).to receive(:set).and_call_original
-    allow(PluginStore).to receive(:set).with(IsbfLearning::STORE, "courses", anything).and_return(false)
+    write_attempted = false
+    allow(PluginStore).to receive(:set).and_wrap_original do |original, store, key, value|
+      if store == IsbfLearning::STORE && key == "courses"
+        write_attempted = true
+        false
+      else
+        original.call(store, key, value)
+      end
+    end
     result = reviewable.perform(admin, :approve_course)
+    expect(write_attempted).to eq(true)
     expect(result.success?).to eq(false)
     expect(result.errors).to include(I18n.t("isbf_learning.course_storage_error"))
     expect(reviewable.reload).to be_pending
