@@ -79,7 +79,7 @@ module IsbfLearning
     label = CGI.escapeHTML(title).gsub(/[\\\[\]]/) { |character| "\\#{character}" }
     body = "[#{label}](<#{link}>)"
     return body if introduction.blank?
-    plain = CGI.escapeHTML(introduction.gsub(/[\\`*_{}\[\]()#+.!|>~:\/-]/) { |character| "\\#{character}" })
+    plain = CGI.escapeHTML(introduction.gsub(/[\\`*_{}\[\]()#+.!|~:\/-]/) { |character| "\\#{character}" })
     "#{body}\n\n#{plain}"
   end
 
