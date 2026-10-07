@@ -8,6 +8,8 @@ module IsbfLearning
   COURSE_FIELD = "isbf_learning_course_id"
   FILES_FIELD = "isbf_learning_files"
   LINK_FIELD = "isbf_learning_link"
+  DESCRIPTION_FIELD = "isbf_learning_description"
+  DESCRIPTION_LIMIT = 300
   GRADES = (1..4).map { |id| { id: id, label: %w[大一 大二 大三 大四][id - 1] } }.freeze
   class StorageError < StandardError; end
 
@@ -65,13 +67,25 @@ module IsbfLearning
     raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_link"))
   end
 
-  def self.link_body(title, link)
+  def self.description(value)
+    return "" if value.nil?
+    unless value.is_a?(String) && value.length <= DESCRIPTION_LIMIT && !value.match?(/[\x00-\x08\x0b\x0c\x0e-\x1f]/)
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_description"))
+    end
+    value.gsub("\r\n", "\n").gsub("\r", "\n").strip
+  end
+
+  def self.link_body(title, link, introduction = "")
     label = CGI.escapeHTML(title).gsub(/[\\\[\]]/) { |character| "\\#{character}" }
-    "[#{label}](<#{link}>)"
+    body = "[#{label}](<#{link}>)"
+    return body if introduction.blank?
+    plain = CGI.escapeHTML(introduction.gsub(/[\\`*_{}\[\]()#+.!|~:\/-]/) { |character| "\\#{character}" })
+    "#{body}\n\n#{plain}"
   end
 
   def self.validate_payload!(user, options)
     ensure_can_submit!(user, Guardian.new(user))
+    description(options[DESCRIPTION_FIELD.to_sym])
     course = Courses.find(options[COURSE_FIELD.to_sym])
     ids = file_ids(options[FILES_FIELD.to_sym])
     raw = options[:raw].to_s
@@ -135,7 +149,7 @@ module IsbfLearning
     end
     {
       id: topic.id, title: topic.title, url: topic.relative_url,
-      description: link ? "" : PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true),
+      description: link ? description(topic.custom_fields[DESCRIPTION_FIELD]) : PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true),
       created_at: post.created_at, grade: course["grade"], course: course,
       author: { username: post.user.username, name: post.user.name, avatar_template: post.user.avatar_template },
       files: files, links: link ? [external_link(link)] : links(post.raw), link_only: link.present?,

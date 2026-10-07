@@ -8,3 +8,15 @@ en:
     invalid: "Select a valid course and supply a title and at least one protected file or external link."
     duplicate_course: "This course already exists in the selected year."
     storage_error: "The private file could not be saved. Check the storage quota or try again."
+    invalid_description: "Brief introduction must be plain text of at most 300 characters."
+    course_storage_error: "The course could not be saved. Please retry."
+    reviewables:
+      actions:
+        approve_course:
+          title: "Approve course"
+          description: "Add this course to its year."
+          complete: "Course approved."
+        reject_course:
+          title: "Reject course"
+          description: "Resolve this request without adding a course."
+          complete: "Course request rejected."

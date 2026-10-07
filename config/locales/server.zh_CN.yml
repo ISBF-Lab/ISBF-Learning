@@ -8,3 +8,15 @@ zh_CN:
     invalid: "请选择有效课程，填写标题，并添加至少一个资料文件或外部链接。"
     duplicate_course: "该年级已存在同名课程。"
     storage_error: "文件未能保存，请检查存储额度或重试。"
+    invalid_description: "简要介绍须为不超过 300 字的纯文本。"
+    course_storage_error: "课程未能保存，请重试。"
+    reviewables:
+      actions:
+        approve_course:
+          title: "批准课程"
+          description: "将课程添加到对应年级。"
+          complete: "课程已批准。"
+        reject_course:
+          title: "拒绝课程"
+          description: "拒绝申请，不添加课程。"
+          complete: "课程申请已拒绝。"

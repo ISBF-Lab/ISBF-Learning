@@ -22,9 +22,18 @@ module IsbfLearning
 
     def create_course
       RateLimiter.new(current_user, "isbf-learning-courses", 10, 1.minute).performed!
-      render json: { course: Courses.create(current_user, name: params[:name], grade: params[:grade]) }
+      IsbfLearning.ensure_can_submit!(current_user, guardian)
+      if current_user.staff?
+        course = Courses.create(current_user, name: params[:name], grade: params[:grade])
+        render json: { success: true, pending: false, course: course }
+      else
+        reviewable = Courses.request(current_user, name: params[:name], grade: params[:grade])
+        render json: { success: true, pending: true, reviewable_id: reviewable.id }
+      end
     rescue Discourse::InvalidParameters => error
       render_json_error(error.message, status: 422)
+    rescue StorageError
+      render_json_error(I18n.t("isbf_learning.course_storage_error"), status: 422)
     end
 
     def resources
@@ -63,14 +72,16 @@ module IsbfLearning
       RateLimiter.new(current_user, "isbf-learning-share", 10, 1.minute).performed!
       link = IsbfLearning.external_link(params[:link])
       title = params[:title].is_a?(String) ? params[:title].strip : ""
+      introduction = IsbfLearning.description(params[:description])
       options = {
         title: title,
-        raw: IsbfLearning.link_body(title, link),
+        raw: IsbfLearning.link_body(title, link, introduction),
         category: IsbfLearning.category_id,
         archetype: Archetype.default,
         isbf_learning_course_id: params[:course_id],
         isbf_learning_files: "[]",
         isbf_learning_link: link,
+        isbf_learning_description: introduction,
       }
       IsbfLearning.validate_payload!(current_user, options)
       creator = TopicCreator.new(current_user, guardian, options)
