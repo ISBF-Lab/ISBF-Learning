@@ -61,7 +61,7 @@ RSpec.describe "ISBF learning link sharing", type: :request do
     end.not_to change(Topic, :count)
   end
 
-  ["admin", "moderator"].each do |role|
+  ["admin"].each do |role|
     it "publishes #{role} links directly as native topics" do
       expect do
         submit_link(public_send(role))
@@ -78,8 +78,8 @@ RSpec.describe "ISBF learning link sharing", type: :request do
     end
   end
 
-  ["new_member", "member"].each do |role|
-    it "queues #{role} links and preserves metadata when staff approve them" do
+  ["new_member", "member", "moderator"].each do |role|
+    it "queues #{role} links and preserves metadata when admins approve them" do
       actor = public_send(role)
       expect do
         expect do

@@ -38,15 +38,21 @@ end
 RSpec.describe "ISBF learning native posting" do
   include_context "ISBF learning contract"
 
-  it "allows moderators to add courses and publish without entering the ordinary queue" do
+  it "allows moderators to add courses but queues their resource submissions" do
     moderator = Fabricate(:moderator, active: true, approved: true, refresh_auto_groups: true)
     added = IsbfLearning::Courses.create(moderator, name: "大学英语", grade: 2).with_indifferent_access
-    post = publish_resource(moderator, isbf_learning_course_id: added[:id])
+    result = NewPostManager.new(moderator, resource_payload(isbf_learning_course_id: added[:id])).perform
+    expect(result.success?).to eq(true)
+    expect(result.action).to eq(:enqueued)
+    expect(result.post).to be_nil
+    approval = result.reviewable.perform(admin, :approve_post)
+    expect(approval.success?).to eq(true)
+    post = approval.created_post
     expect(post).to be_persisted
     expect(post.topic.reload.custom_fields["isbf_learning_course_id"]).to eq(added[:id])
   end
 
-  it "publishes staff resources as native topics with persistent course metadata" do
+  it "publishes admin resources as native topics with persistent course metadata" do
     post = publish_resource
     expect(post).to be_persisted
     expect(IsbfLearning.learning_topic?(post.topic)).to eq(true)

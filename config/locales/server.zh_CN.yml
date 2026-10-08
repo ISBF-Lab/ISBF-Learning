@@ -4,6 +4,10 @@ zh_CN:
     isbf_learning_category_id: "仅登录用户可访问的学习资源分类 ID。"
     isbf_learning_storage_limit_mb: "学习资源私有文件总容量上限（MiB）。"
   isbf_learning:
+    invalid_contributor: "贡献者须为不超过 15 字的单行纯文本。"
+    unknown_contributor: "未知贡献者"
+    contributor_label: "贡献者"
+    delete_failed: "资料未能删除，请重试。"
     invalid_link: "请填写一个完整的外部 HTTP 或 HTTPS 链接（最多 2048 字符）。"
     invalid: "请选择有效课程，填写标题，并添加至少一个资料文件或外部链接。"
     duplicate_course: "该年级已存在同名课程。"
