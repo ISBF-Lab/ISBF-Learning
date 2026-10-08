@@ -77,7 +77,8 @@ after_initialize do
     end
 
     def can_recover_post?(post)
-      return false if post&.is_first_post? && IsbfLearning.learning_topic?(post.topic) && !is_admin?
+      topic = post&.topic || (post && Topic.with_deleted.find_by(id: post.topic_id))
+      return false if post&.is_first_post? && IsbfLearning.learning_topic?(topic) && !is_admin?
       super
     end
 
