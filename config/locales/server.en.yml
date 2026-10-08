@@ -4,6 +4,10 @@ en:
     isbf_learning_category_id: "Authenticated learning resource category ID."
     isbf_learning_storage_limit_mb: "Maximum private learning file storage in MiB."
   isbf_learning:
+    invalid_contributor: "Contributor must be a single-line name of at most 15 characters."
+    unknown_contributor: "Unknown contributor"
+    contributor_label: "Contributor"
+    delete_failed: "The resource could not be deleted. Please retry."
     invalid_link: "Enter one complete external HTTP or HTTPS link (up to 2048 characters)."
     invalid: "Select a valid course and supply a title and at least one protected file or external link."
     duplicate_course: "This course already exists in the selected year."

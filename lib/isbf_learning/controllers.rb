@@ -73,6 +73,7 @@ module IsbfLearning
       link = IsbfLearning.external_link(params[:link])
       title = params[:title].is_a?(String) ? params[:title].strip : ""
       introduction = IsbfLearning.description(params[:description])
+      contributor = IsbfLearning.contributor(params[:contributor], current_user)
       options = {
         title: title,
         raw: IsbfLearning.link_body(title, link, introduction),
@@ -82,6 +83,7 @@ module IsbfLearning
         isbf_learning_files: "[]",
         isbf_learning_link: link,
         isbf_learning_description: introduction,
+        isbf_learning_contributor: contributor,
       }
       IsbfLearning.validate_payload!(current_user, options)
       creator = TopicCreator.new(current_user, guardian, options)
@@ -95,6 +97,20 @@ module IsbfLearning
       }
     rescue Discourse::InvalidParameters => error
       render_json_error(error.message, status: 422)
+    end
+
+    def destroy_resource
+      raise Discourse::InvalidAccess unless guardian.is_admin?
+      raise Discourse::InvalidParameters.new("id") unless params[:id].to_s.match?(/\A[1-9]\d{0,18}\z/)
+      topic = Topic.includes(:first_post).find_by(id: params[:id])
+      raise Discourse::NotFound unless topic && IsbfLearning.resource(topic, guardian)
+      guardian.ensure_can_delete!(topic)
+      destroyer = PostDestroyer.new(current_user, topic.first_post)
+      destroyer.destroy
+      unless Topic.with_deleted.find_by(id: topic.id)&.deleted_at
+        return render_json_error(I18n.t("isbf_learning.delete_failed"), status: 422)
+      end
+      render json: { success: true }
     end
 
     def upload

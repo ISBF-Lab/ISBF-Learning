@@ -10,6 +10,9 @@ module IsbfLearning
   LINK_FIELD = "isbf_learning_link"
   DESCRIPTION_FIELD = "isbf_learning_description"
   DESCRIPTION_LIMIT = 300
+  CONTRIBUTOR_FIELD = "isbf_learning_contributor"
+  CONTRIBUTOR_LIMIT = 15
+  RESOURCE_FIELDS = [COURSE_FIELD, FILES_FIELD, LINK_FIELD, DESCRIPTION_FIELD, CONTRIBUTOR_FIELD].freeze
   GRADES = (1..4).map { |id| { id: id, label: %w[大一 大二 大三 大四][id - 1] } }.freeze
   class StorageError < StandardError; end
 
@@ -75,6 +78,25 @@ module IsbfLearning
     value.gsub("\r\n", "\n").gsub("\r", "\n").strip
   end
 
+  def self.contributor_name(user)
+    user&.name.presence || user&.username.presence || I18n.t("isbf_learning.unknown_contributor")
+  end
+
+  def self.contributor(value, user)
+    default = contributor_name(user)
+    return default if value.nil? || (value.is_a?(String) && value.strip.empty?)
+    unless value.is_a?(String) && !value.match?(/[\x00-\x1f\x7f]/) &&
+             (value.strip.length <= CONTRIBUTOR_LIMIT || value.strip == default)
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_contributor"))
+    end
+    value.strip
+  end
+
+  def self.learning_reviewable?(reviewable)
+    reviewable.is_a?(ReviewableQueuedPost) &&
+      ((category_id && reviewable.category_id == category_id) || reviewable.payload&.[](COURSE_FIELD).present?)
+  end
+
   def self.link_body(title, link, introduction = "")
     label = CGI.escapeHTML(title).gsub(/[\\\[\]]/) { |character| "\\#{character}" }
     body = "[#{label}](<#{link}>)"
@@ -86,6 +108,7 @@ module IsbfLearning
   def self.validate_payload!(user, options)
     ensure_can_submit!(user, Guardian.new(user))
     description(options[DESCRIPTION_FIELD.to_sym])
+    contributor(options[CONTRIBUTOR_FIELD.to_sym], user)
     course = Courses.find(options[COURSE_FIELD.to_sym])
     ids = file_ids(options[FILES_FIELD.to_sym])
     raw = options[:raw].to_s
@@ -151,7 +174,9 @@ module IsbfLearning
       id: topic.id, title: topic.title, url: topic.relative_url,
       description: link ? description(topic.custom_fields[DESCRIPTION_FIELD]) : PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true),
       created_at: post.created_at, grade: course["grade"], course: course,
-      author: { username: post.user.username, name: post.user.name, avatar_template: post.user.avatar_template },
+      contributor: topic.custom_fields[CONTRIBUTOR_FIELD].presence || contributor_name(post.user),
+      can_delete: guardian.is_admin? && guardian.can_delete_topic?(topic),
+      author: post.user && { username: post.user.username, name: post.user.name, avatar_template: post.user.avatar_template },
       files: files, links: link ? [external_link(link)] : links(post.raw), link_only: link.present?,
     }
   end

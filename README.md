@@ -1,6 +1,6 @@
 # ISBF Learning
 
-Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，主题、回复、审核和搜索复用 Discourse。课程按大一至大四归类；staff 可直接添加，普通成员可申请并由 staff 在原生 `/review` 批准或拒绝。已登录成员可以阅读资源并提交材料。普通成员的提交进入原生审核队列，staff 可直接发布。审核通过后，普通作者不能修改资源首帖，staff 可通过原生编辑功能维护内容。
+Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，主题、回复、审核和搜索复用 Discourse。课程按大一至大四归类；staff 可直接添加，普通成员可申请并由 staff 在原生 `/review` 批准或拒绝。已登录成员可以阅读资源并提交材料。所有非管理员（包括版主）的资料提交进入原生审核队列，仅管理员可直接发布、审核、编辑和删除学习资料。课程申请仍使用原有 staff 权限。资料贡献者名称与真实提交账号分别保存，名称不会改变 Topic/Post 作者。
 
 ## 配置与数据
 
@@ -10,7 +10,7 @@ Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，�
 
 资源分类应限制为 `trust_level_0` 和 `staff` 拥有完整权限，避免向匿名访客开放；插件仍通过 Guardian 检查实际分类访问权限。插件仅在该资源分类内允许已激活、已批准且未被禁言或封禁的成员提交，保留原生审核，不修改全站 `create_topic_allowed_groups`。配置后在 Staging 核查访客、普通成员、staff 的真实读写与审核行为。
 
-课程目录和附件元数据保存在 `PluginStore` 的 `isbf-learning` 命名空间。资源为原生 Topic/Post，首帖创建时写入课程、文件、外链和选填简介的 Topic custom fields；审核完整保留这些字段。资源必须提供明确标题，并至少包含一个受保护附件链接或合法 HTTP(S) 外链。原生公共 `/uploads/` 和 `upload://` 附件不能作为资源库私有材料提交。
+课程目录和附件元数据保存在 `PluginStore` 的 `isbf-learning` 命名空间。资源为原生 Topic/Post，首帖创建时写入课程、文件、外链、选填简介和贡献者名称的 Topic custom fields；审核完整保留这些字段。资源必须提供明确标题，并至少包含一个受保护附件链接或合法 HTTP(S) 外链。原生公共 `/uploads/` 和 `upload://` 附件不能作为资源库私有材料提交。
 
 ## 接口
 
@@ -18,11 +18,15 @@ Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，�
 
 课程申请使用原生 `ReviewableIsbfLearningCourse` 和审核权限，ISBF-UI 通过官方 `registerReviewableComponent` 展示课程及年级。批准和目录写入受同一分布式互斥锁保护，锁覆盖原生审核事务的提交；不同用户申请同一课程时，批准复用已存在课程。写入失败不会批准申请，审核事务失败同时回滚目录。禁言、封禁、未获准及无分类权限的账号不能申请。
 
-`GET /isbf/learning/resources` 接受 `course_id`、`page` 和 `q`，返回 `resources` 与 `has_more`。普通列表按课程查询；有 `q` 时使用 Core Search 搜索资源库全部年级与课程，忽略当前课程筛选。两种查询均仅覆盖配置资源分类内当前用户可以访问的已发布资源。
+`GET /isbf/learning/resources` 接受 `course_id`、`page` 和 `q`，返回 `resources` 与 `has_more`；每项包含 `contributor`（纯文本贡献者名称）和 `can_delete`（当前用户是管理员且 Guardian 允许删除该主题时为 true）。普通列表按课程查询；有 `q` 时使用 Core Search 搜索资源库全部年级与课程，忽略当前课程筛选。两种查询均仅覆盖配置资源分类内当前用户可以访问的已发布资源。
 
-分享窗口按标题、选填简要介绍和链接排列，使用 `POST /isbf/learning/resources`，参数为 `course_id`、`title`、`description`（可选）、`link`。简介最多 300 个 Unicode 字符，支持换行；服务端拒绝超长、非字符串和非法控制字符，保存后按纯文本显示在资料标题下方，并参与限定学习库范围的原生搜索。空简介与历史资料保持原样。课程沿用页面当前选项。接口固定学习分类，不接受正文、标签、附件或其他话题参数；外链必须是完整 HTTP(S) 地址，最多 2048 字符，不接受本站链接、内嵌凭据或空白字符。返回 `success`、`pending` 和已发布的 `resource`；普通成员先进入原生 Reviewable，审核通过前不会出现资料卡片。
+分享窗口包含标题、选填简要介绍、链接和选填贡献者名称，使用 `POST /isbf/learning/resources`，参数为 `course_id`、`title`、`description`（可选）、`link`、`contributor`（可选）。贡献者输入去除首尾空白后最多 15 个 Unicode 码点，必须是单行字符串，拒绝换行、控制字符与对象/数组；按纯文本序列化。未提供、nil 或空白时采用原提交账号的 `name.presence || username`；此账号名称回退不受输入框 15 字限制。历史资料缺少该字段时同样回退到原提交账号。简介最多 300 个 Unicode 字符，支持换行；服务端拒绝超长、非字符串和非法控制字符，保存后按纯文本显示在资料标题下方，并参与限定学习库范围的原生搜索。空简介与历史资料保持原样。课程沿用页面当前选项。接口固定学习分类，不接受正文、标签、附件或其他话题参数；外链必须是完整 HTTP(S) 地址，最多 2048 字符，不接受本站链接、内嵌凭据或空白字符。返回 `success`、`pending` 和已发布的 `resource`；所有非管理员（包括版主）先进入原生 Reviewable，审核通过前不会出现资料卡片。
 
-服务端仍使用原生 NewPostManager、Topic/Post 和审核流程。新资料保存 `isbf_learning_link` 和 `isbf_learning_description`，审核 payload 保留这些字段，卡片标题直接打开链接，不重复显示内部正文。原生主题标题校验继续生效。历史附件资料与原生 staff 编辑功能保留，原有 `POST /posts` 的资源字段仍受分类、身份、附件权限和审核限制。
+服务端仍使用原生 NewPostManager、Topic/Post 和审核流程。新资料保存 `isbf_learning_link`、`isbf_learning_description` 和 `isbf_learning_contributor`，审核 payload 保留这些字段，卡片标题直接打开链接，不重复显示内部正文。原生主题标题校验继续生效。历史附件资料与原生管理员编辑功能保留，原有 `POST /posts` 的资源字段仍受分类、身份、附件权限和审核限制。
+
+学习资料沿用原生 `ReviewableQueuedPost`，只有管理员可在原生 `/review` 列表、详情、菜单、编辑及审核动作中查看或操作这些记录；版主与分类审核组成员均无权操作。贡献者与简介保留在 queued payload 中，管理员可从审核详情查看。批准保留真实提交者和资料元数据，拒绝不创建资料。普通论坛审核记录及课程申请的 staff 权限不变；客户端不能通过原生 `/posts` 传入 `reviewed_queued_post` 绕过资料审核。Site serializer 声明 `resource_contributor: true` 和 `resource_admin_management: true` 供主题识别接口能力。
+
+`DELETE /isbf/learning/resources/:id` 使用数字 Topic ID，仅管理员且通过原生 Guardian 删除权限时可调用；目标必须属于当前学习库的有效可见资源，普通主题、私信与无课程关联主题不可通过该接口删除。删除调用原生 `PostDestroyer` 软删除首帖与主题，不接受客户端的永久销毁参数，不清除资料元数据或私有文件。资源从列表、分页和搜索消失，普通用户（包括原作者）的私有文件访问立即撤销。学习资料的原生 Topic/首帖删除、编辑和恢复入口同样仅限管理员；管理员通过原生恢复流程恢复资源后，文件权限重新按主题可见性检查。
 
 配置的学习分类从 TopicQuery 默认查询中排除，包含最新、热门、排行榜、筛选及直接分类列表，普通成员和 staff 均适用。资料库使用自己的受权限控制的列表和限定范围的原生搜索；已有资料也不会出现在首页、探索或右栏最近讨论。审核队列、直接主题读取及全站搜索不因该列表排除而改变。
 
@@ -44,4 +48,4 @@ GitHub Actions 通过 Discourse 官方插件测试工作流执行 Rails RSpec，
 LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 ```
 
-测试覆盖课程权限、原生审核及元数据保留、首帖编辑限制、非法提交、资源查询范围和附件存储/访问约束。本机未启动完整 Discourse，未执行 Rails 集成测试或浏览器回归；语法检查不能证明实际 UI、移动端、亮暗模式、Admin 隔离或部署后的文件下载行为。合并部署前须由 CI 和 Staging 验证。
+测试规格覆盖课程权限、贡献者校验和作者归属、原生审核及元数据保留、管理员专属资料审核与维护、原生接口绕过、软删除与恢复、查询范围和附件存储/访问约束。这些新增规格需要 CI 执行，不能视为已通过的 Rails 回归。本机未启动完整 Discourse，未执行 Rails 集成测试或浏览器回归；语法检查不能证明实际 UI、移动端、亮暗模式、Admin 隔离或部署后的文件下载行为。合并部署前须由 CI 和 Staging 验证。
