@@ -204,7 +204,7 @@ RSpec.describe "ISBF learning contributors and resource review", type: :request 
     ordinary = Fabricate(:reviewable_queued_post_topic, created_by: member, target_created_by: member,
       category: ordinary_category, payload: { raw: "Ordinary community submission", title: "Ordinary queued discussion", category: ordinary_category.id })
     application = IsbfLearning::Courses.request(member, name: "大学物理", grade: 2)
-    expect(Reviewable.viewable_by(moderator).where(id: [ordinary.id, application.id]).pluck(:id)).to contain_exactly(ordinary.id, application.id)
+    expect(Reviewable.viewable_by(moderator, preload: false).where(id: [ordinary.id, application.id]).pluck(:id)).to contain_exactly(ordinary.id, application.id)
     expect(ordinary.send(:can_review_target?, Guardian.new(moderator))).to eq(true)
     expect(application.send(:can_review_target?, Guardian.new(moderator))).to eq(true)
   end

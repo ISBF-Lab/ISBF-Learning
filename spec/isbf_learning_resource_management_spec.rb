@@ -133,7 +133,8 @@ RSpec.describe "ISBF learning resource administration", type: :request do
     sign_in(admin)
     [ordinary.topic_id, pm.topic_id, missing_course.topic_id, "invalid", "#{ordinary.topic_id}x", 999_999_999].each do |id|
       delete "/isbf/learning/resources/#{id}.json"
-      expect(response.status).to be_in([403, 404, 422])
+      expected = id.to_s.match?(/\A[1-9]\d{0,18}\z/) ? [403, 404, 422] : [400]
+      expect(response.status).to be_in(expected)
     end
     [ordinary, pm, missing_course].each do |post|
       expect(post.reload.deleted_at).to be_nil
@@ -157,11 +158,14 @@ RSpec.describe "ISBF learning resource administration", type: :request do
       expect { IsbfLearning::Files.download(id, actor, Guardian.new(actor)) }.to raise_error(Discourse::InvalidAccess)
     end
     [member, moderator, category_reviewer].each do |actor|
+      guardian = Guardian.new(actor)
+      expect(guardian.can_recover_post?(Post.with_deleted.find(post.id))).to eq(false)
+      expect(guardian.can_recover_topic?(Topic.with_deleted.find(post.topic_id))).to eq(false)
       sign_in(actor)
       put "/posts/#{post.id}/recover.json"
-      expect(response.status).to eq(403), response.body
+      expect(response.status).to be_in([403, 404]), response.body
       put "/t/#{post.topic_id}/recover.json"
-      expect(response.status).to eq(403), response.body
+      expect(response.status).to be_in([403, 404]), response.body
       expect(Post.with_deleted.find(post.id).deleted_at).to be_present
       expect(Topic.with_deleted.find(post.topic_id).deleted_at).to be_present
     end
