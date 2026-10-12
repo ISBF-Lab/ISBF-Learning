@@ -49,3 +49,15 @@ LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 ```
 
 测试规格覆盖课程权限、贡献者校验和作者归属、原生审核及元数据保留、管理员专属资料审核与维护、原生接口绕过、软删除与恢复、查询范围和附件存储/访问约束。这些新增规格需要 CI 执行，不能视为已通过的 Rails 回归。本机未启动完整 Discourse，未执行 Rails 集成测试或浏览器回归；语法检查不能证明实际 UI、移动端、亮暗模式、Admin 隔离或部署后的文件下载行为。合并部署前须由 CI 和 Staging 验证。
+
+## 独立资料库
+
+资料库复用本插件的审核、原生 Topic/Post、搜索及管理员维护权限，入口为 `/isbf/library`。`isbf_learning_enabled` 仍是插件总开关；新增 `isbf_library_enabled` 默认关闭，`isbf_library_category_id` 默认 0，必须配置为不同于课程资源的真实分类 ID。类别权限采用课程资源相同的登录用户规则。目录从空开始，不自动生成示例数据。
+
+`GET/POST /isbf/library/categories` 读取或添加分类（创建参数 `name`）；`GET/POST /isbf/library/groups` 读取或添加分组（创建参数 `name`、`category_id`，该参数是目录分类 UUID，不是 Discourse 分类整数 ID）。目录保存到独立 PluginStore `isbf-library` 的 `categories`、`groups`。staff 直接添加，普通成员通过 `ReviewableIsbfLibraryDirectory` 申请，原生动作 `approve_directory` / `reject_directory` 审核；分组必须关联已批准的分类。同范围同名重复申请去重，审核与 PluginStore 写入使用同一原生数据库事务和目录互斥锁。
+
+`GET /isbf/library/resources` 使用 `group_id` 或 `q` 和零起点 `page`；没有筛选时返回空列表。有 `q` 时原生 Search 搜索资料库全部有效分组，与课程资源隔离。`POST` 接受 `group_id`、`title`、`link`、可选 `description` 和 `contributor`。仅分享外部链接，不新增上传接口。返回同样的 `success`、`pending`、`resource`；资料带 `category` 和 `group` 目录信息。资源使用独立 `isbf_library_*` Topic 字段，管理员编辑沿用 `/posts/:id.json` 的顶层 `title` 与首帖字段，删除沿用 `DELETE /isbf/library/resources/:id`。
+
+所有非 admin（包括版主）投稿进入管理员专属原生审核。原生发帖与修订统一按实际分类校验所属库，拒绝跨库字段/目录 ID、匿名和公共附件；已有课程资料及其私有附件机制不变。禁用资料库不会移除已有资料的管理员维护限制，两个已配置资源分类继续从社区列表排除，全站搜索保留 Guardian 权限。
+
+回滚时可关闭资料库入口/新增发布并恢复旧主题，但保留当前插件的权限钩子和全部审核类型。存在新目录申请记录时，不得回退到未注册 `ReviewableIsbfLibraryDirectory` 的旧插件版本；不删除历史目录、资料或申请。发布前备份数据库、主题、插件、分类配置和既有私有附件目录。

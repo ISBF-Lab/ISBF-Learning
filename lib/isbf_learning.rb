@@ -6,6 +6,7 @@ require "cgi"
 module IsbfLearning
   STORE = "isbf-learning"
   COURSE_FIELD = "isbf_learning_course_id"
+  GROUP_FIELD = COURSE_FIELD
   FILES_FIELD = "isbf_learning_files"
   LINK_FIELD = "isbf_learning_link"
   DESCRIPTION_FIELD = "isbf_learning_description"
@@ -19,6 +20,41 @@ module IsbfLearning
   def self.category_id
     id = SiteSetting.isbf_learning_category_id.to_i
     id if id.positive? && Category.exists?(id: id)
+  end
+
+  def self.enabled?
+    SiteSetting.isbf_learning_enabled && category_id.present?
+  end
+
+  def self.resource_libraries
+    [IsbfLearning, IsbfLibrary]
+  end
+
+  def self.all_resource_fields
+    resource_libraries.flat_map { |library| library::RESOURCE_FIELDS }
+  end
+
+  def self.resource_library_for_category(id)
+    return unless id.to_i.positive?
+    resource_libraries.find { |library| library.category_id == id.to_i }
+  end
+
+  def self.resource_library_for_topic(topic)
+    resource_library_for_category(topic.category_id) if topic && !topic.private_message?
+  end
+
+  def self.ensure_scope_fields!(library, options)
+    foreign = all_resource_fields - library::RESOURCE_FIELDS
+    if foreign.any? { |field| !options[field.to_sym].nil? }
+      raise Discourse::InvalidParameters.new("resource_library")
+    end
+  end
+
+  def self.reviewable_resource_library(reviewable)
+    return unless reviewable.is_a?(ReviewableQueuedPost)
+    resource_library_for_category(reviewable.category_id) || resource_libraries.find do |library|
+      reviewable.payload&.[](library::GROUP_FIELD).present?
+    end
   end
 
   def self.learning_topic?(topic)
@@ -93,8 +129,7 @@ module IsbfLearning
   end
 
   def self.learning_reviewable?(reviewable)
-    reviewable.is_a?(ReviewableQueuedPost) &&
-      ((category_id && reviewable.category_id == category_id) || reviewable.payload&.[](COURSE_FIELD).present?)
+    reviewable_resource_library(reviewable).present?
   end
 
   def self.link_body(title, link, introduction = "")
@@ -107,6 +142,7 @@ module IsbfLearning
 
   def self.validate_payload!(user, options)
     ensure_can_submit!(user, Guardian.new(user))
+    ensure_scope_fields!(self, options)
     description(options[DESCRIPTION_FIELD.to_sym])
     contributor(options[CONTRIBUTOR_FIELD.to_sym], user)
     course = Courses.find(options[COURSE_FIELD.to_sym])

@@ -5,11 +5,14 @@ module IsbfLearning
     def viewable_by(user, **options)
       scope = super
       return scope if user&.admin?
-      scope.where(
-        "NOT (reviewables.type = :type AND (COALESCE(reviewables.category_id, 0) = :category_id OR COALESCE(reviewables.payload ->> :course_field, '') <> ''))",
-        type: "ReviewableQueuedPost", category_id: IsbfLearning.category_id || -1,
-        course_field: IsbfLearning::COURSE_FIELD,
-      )
+      IsbfLearning.resource_libraries.each do |library|
+        scope = scope.where(
+          "NOT (reviewables.type = :type AND (COALESCE(reviewables.category_id, 0) = :category_id OR COALESCE(reviewables.payload ->> :group_field, '') <> ''))",
+          type: "ReviewableQueuedPost", category_id: library.category_id || -1,
+          group_field: library::GROUP_FIELD,
+        )
+      end
+      scope
     end
   end
 
@@ -29,7 +32,8 @@ module IsbfLearning
     def cooked
       body = super
       return body unless IsbfLearning.learning_reviewable?(object)
-      name = object.payload[IsbfLearning::CONTRIBUTOR_FIELD].presence ||
+      library = IsbfLearning.reviewable_resource_library(object)
+      name = object.payload[library::CONTRIBUTOR_FIELD].presence ||
         IsbfLearning.contributor_name(object.target_created_by)
       "#{body}<p>#{CGI.escapeHTML(I18n.t('isbf_learning.contributor_label'))}: #{CGI.escapeHTML(name)}</p>"
     end
@@ -41,5 +45,7 @@ Reviewable.prepend(IsbfLearning::AdminReviewPermission)
 ReviewableQueuedPost.before_validation do
   self.reviewable_by_moderator = false if IsbfLearning.learning_reviewable?(self)
 end
-ReviewableQueuedPostSerializer.payload_attributes(IsbfLearning::CONTRIBUTOR_FIELD.to_sym)
+IsbfLearning.resource_libraries.each do |library|
+  ReviewableQueuedPostSerializer.payload_attributes(library::CONTRIBUTOR_FIELD.to_sym)
+end
 ReviewableQueuedPostSerializer.prepend(IsbfLearning::ContributorReviewSerializer)
