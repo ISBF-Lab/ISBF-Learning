@@ -26,6 +26,7 @@ module IsbfLibrary
       unless %w[category group].include?(kind) && name.is_a?(String)
         raise Discourse::InvalidParameters.new("kind")
       end
+      raise Discourse::InvalidParameters.new("name") if name.match?(/[\x00-\x1f\x7f]/)
       name = name.strip.unicode_normalize(:nfkc)
       unless name.length.between?(1, 80) && !name.match?(/[\x00-\x1f\x7f]/)
         raise Discourse::InvalidParameters.new("name")

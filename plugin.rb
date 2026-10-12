@@ -29,7 +29,8 @@ after_initialize do
       register_topic_custom_field_type(field, type, max_length: 4096)
       add_permitted_post_create_param(field.to_sym, :string)
       NewPostManager.add_plugin_payload_attribute(field.to_sym)
-      add_permitted_post_update_param(field.to_sym)
+      # Topic fields use the revision tracker; the native post hook still requires a callable.
+      add_permitted_post_update_param(field.to_sym) { |_post, _value| }
       PostRevisor.track_topic_field(field.to_sym) do |changes, value|
         next if value.nil?
         unless changes.user.admin? && IsbfLearning.resource_library_for_topic(changes.topic) == library

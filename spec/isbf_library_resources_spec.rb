@@ -325,6 +325,68 @@ RSpec.describe "ISBF library resources and native permissions", type: :request d
     expect(topic.reload.title).to eq("Revised library reference collection")
   end
 
+  it "preserves native learning resource metadata edits through the shared field registration" do
+    group
+    catalog_before = %w[categories groups].to_h do |key|
+      [key, PluginStore.get(IsbfLibrary::STORE, key).deep_dup]
+    end
+    sign_in(member)
+    post "/isbf/learning/resources.json", params: {
+      course_id: course.fetch("id"), title: "Original learning reference collection",
+      link: "https://example.org/original-course.pdf", description: "Original course introduction",
+      contributor: "课程小组",
+    }
+    expect(response.status).to eq(200), response.body
+    expect(response.parsed_body.fetch("pending")).to eq(true)
+    approval = ReviewableQueuedPost.order(:id).last.perform(admin, :approve_post)
+    expect(approval.success?).to eq(true)
+    resource = approval.created_post
+    topic = resource.topic.reload
+    topic_created_at = topic.created_at
+    post_created_at = resource.created_at
+    version = resource.version
+    revised_link = "https://example.org/revised-course.pdf"
+    revised_description = "Updated course introduction"
+    revised_raw = IsbfLearning.link_body("Revised learning reference collection", revised_link, revised_description)
+
+    sign_in(admin)
+    put "/posts/#{resource.id}.json", params: {
+      title: "Revised learning reference collection",
+      post: {
+        raw: revised_raw, isbf_learning_link: revised_link,
+        isbf_learning_description: revised_description, isbf_learning_contributor: "复习小组",
+      },
+    }
+    expect(response.status).to eq(200), response.body
+    topic.reload
+    resource.reload
+    expect(topic.title).to eq("Revised learning reference collection")
+    expect(topic.category_id).to eq(learning_category.id)
+    expect(topic.user_id).to eq(member.id)
+    expect(resource.user_id).to eq(member.id)
+    expect(topic.created_at).to eq(topic_created_at)
+    expect(resource.created_at).to eq(post_created_at)
+    expect(topic.custom_fields).to include(
+      IsbfLearning::COURSE_FIELD => course.fetch("id"), IsbfLearning::FILES_FIELD => [],
+      IsbfLearning::LINK_FIELD => revised_link, IsbfLearning::DESCRIPTION_FIELD => revised_description,
+      IsbfLearning::CONTRIBUTOR_FIELD => "复习小组",
+    )
+    expect(topic.custom_fields.keys.grep(/\Aisbf_library_/)).to be_empty
+    expect(resource.raw).to eq(revised_raw)
+    expect(resource.version).to be > version
+    expect(PostRevision.where(post_id: resource.id)).to be_present
+    sign_in(member)
+    get "/isbf/learning/resources.json", params: { course_id: course.fetch("id") }
+    expect(response.status).to eq(200), response.body
+    updated = response.parsed_body.fetch("resources").find { |item| item.fetch("id") == topic.id }
+    expect(updated).to include(
+      "title" => topic.title, "links" => [revised_link],
+      "description" => revised_description, "contributor" => "复习小组",
+    )
+    catalog_before.each do |key, entries|
+      expect(PluginStore.get(IsbfLibrary::STORE, key)).to eq(entries)
+    end
+  end
   it "soft deletes through native PostDestroyer without losing catalog or metadata" do
     resource = publish
     sign_in(admin)
