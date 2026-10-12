@@ -122,7 +122,7 @@ RSpec.describe "ISBF library isolation from academy resource permissions", type:
     # Simulate the separate academy plugin's native review visibility grant.
     [learning, library].each { |reviewable| reviewable.update_columns(reviewable_by_moderator: true) }
     guardian = Guardian.new(delegate)
-    expect(Reviewable.viewable_by(delegate).where(id: [learning.id, library.id]).pluck(:id)).to eq([learning.id])
+    expect(Reviewable.viewable_by(delegate, preload: false).where(id: [learning.id, library.id]).pluck(:id)).to eq([learning.id])
     expect(learning.actions_for(guardian).has?(:approve_post)).to eq(true)
     expect(library.actions_for(guardian).has?(:approve_post)).to eq(false)
     expect { library.perform(delegate, :approve_post) }.to raise_error(Reviewable::InvalidAction)

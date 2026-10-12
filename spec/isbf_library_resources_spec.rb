@@ -320,6 +320,7 @@ RSpec.describe "ISBF library resources and native permissions", type: :request d
     expect(resource.reload.user_id).to eq(member.id)
     expect(resource.raw).to include("Newest reference")
     expect(list.first.fetch("links")).to eq(["https://example.org/revised.pdf"])
+    sign_in(admin)
     put "/posts/#{resource.id}.json", params: { title: "", post: { raw: resource.raw } }
     expect(response.status).to be_in([400, 422]), response.body
     expect(topic.reload.title).to eq("Revised library reference collection")
