@@ -9,8 +9,19 @@ class ReviewableIsbfLearningCourse < Reviewable
 
   def build_combined_actions(actions, guardian, _args)
     return unless pending? && can_review_target?(guardian)
-    build_action(actions, :approve_course, icon: "check", button_class: "btn-primary", source: "isbf_learning")
-    build_action(actions, :reject_course, icon: "xmark", source: "isbf_learning")
+    build_action(
+      actions,
+      :approve_course,
+      icon: "check",
+      button_class: "btn-primary",
+      source: "isbf_learning"
+    )
+    build_action(
+      actions,
+      :reject_course,
+      icon: "xmark",
+      source: "isbf_learning"
+    )
   end
 
   def perform(performed_by, action_id, args = nil)
@@ -18,9 +29,12 @@ class ReviewableIsbfLearningCourse < Reviewable
   end
 
   def perform_approve_course(performed_by, _args)
-    course = IsbfLearning::Courses.approve_locked(
-      performed_by, name: payload.fetch("course_name"), grade: payload.fetch("grade"),
-    )
+    course =
+      IsbfLearning::Courses.approve_locked(
+        performed_by,
+        name: payload.fetch("course_name"),
+        grade: payload.fetch("grade")
+      )
     self.payload = payload.merge("course_id" => course.fetch("id"))
     create_result(:success, :approved)
   rescue IsbfLearning::StorageError
@@ -36,8 +50,18 @@ class ReviewableIsbfLearningCourse < Reviewable
   private
 
   def can_review_target?(guardian)
-    guardian.is_staff? && SiteSetting.isbf_learning_enabled &&
-      category_id == IsbfLearning.category_id && category && guardian.can_see_category?(category) &&
-      !guardian.user.silenced? && !guardian.user.suspended? && super
+    (
+      IsbfLearning.can_review?(guardian) ||
+        (
+          guardian.is_staff? &&
+            !(
+              SiteSetting.respond_to?(:academy_roles_enabled?) &&
+                SiteSetting.academy_roles_enabled?
+            )
+        )
+    ) && SiteSetting.isbf_learning_enabled &&
+      category_id == IsbfLearning.category_id && category &&
+      guardian.can_see_category?(category) && !guardian.user.silenced? &&
+      !guardian.user.suspended? && super
   end
 end

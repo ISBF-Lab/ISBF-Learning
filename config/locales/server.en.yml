@@ -1,8 +1,10 @@
 en:
   site_settings:
-    isbf_learning_enabled: "Enable the ISBF learning resource library."
-    isbf_learning_category_id: "Authenticated learning resource category ID."
+    isbf_learning_enabled: "Enable the ISBF course-resource and library plugin."
+    isbf_learning_category_id: "Authenticated course-resource category ID."
     isbf_learning_storage_limit_mb: "Maximum private learning file storage in MiB."
+    isbf_library_enabled: "Enable the independent resource library (requires the ISBF Learning plugin)."
+    isbf_library_category_id: "Resource library category ID, different from the course-resource category."
   isbf_learning:
     invalid_contributor: "Contributor must be a single-line name of at most 15 characters."
     unknown_contributor: "Unknown contributor"
@@ -24,3 +26,17 @@ en:
           title: "Reject course"
           description: "Resolve this request without adding a course."
           complete: "Course request rejected."
+  isbf_library:
+    invalid: "Select a valid resource group and provide a title and external link."
+    duplicate_directory: "This directory name already exists in the selected scope."
+    directory_storage_error: "The directory could not be saved. Please retry."
+    reviewables:
+      actions:
+        approve_directory:
+          title: "Approve directory"
+          description: "Add this category or group to the resource library."
+          complete: "Directory approved."
+        reject_directory:
+          title: "Reject directory"
+          description: "Resolve this request without adding a directory."
+          complete: "Directory request rejected."

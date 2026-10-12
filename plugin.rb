@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: isbf-learning
-# about: Authenticated learning resources with native moderation and private files.
-# version: 0.4.0
+# about: Authenticated course resources and an independent resource library.
+# version: 0.5.0
 # authors: ISBF Lab
 # url: https://github.com/ISBF-Lab/ISBF-Learning
 # required_version: 3.2.0
@@ -11,38 +11,47 @@ enabled_site_setting :isbf_learning_enabled
 
 after_initialize do
   require_relative "lib/isbf_learning"
+  require_relative "lib/isbf_library"
   require_relative "lib/isbf_learning/controllers"
+  require_relative "lib/isbf_library/controllers"
   require_relative "lib/isbf_learning/admin_review"
   require_relative "app/models/reviewable_isbf_learning_course"
   require_relative "app/serializers/reviewable_isbf_learning_course_serializer"
+  require_relative "app/models/reviewable_isbf_library_directory"
+  require_relative "app/serializers/reviewable_isbf_library_directory_serializer"
   register_reviewable_type ReviewableIsbfLearningCourse
+  register_reviewable_type ReviewableIsbfLibraryDirectory
 
-  { IsbfLearning::COURSE_FIELD => :string, IsbfLearning::FILES_FIELD => :json,
-    IsbfLearning::LINK_FIELD => :string, IsbfLearning::DESCRIPTION_FIELD => :string,
-    IsbfLearning::CONTRIBUTOR_FIELD => :string }.each do |field, type|
-    register_topic_custom_field_type(field, type, max_length: 4096)
-    add_permitted_post_create_param(field.to_sym, :string)
-    NewPostManager.add_plugin_payload_attribute(field.to_sym)
-    add_permitted_post_update_param(field.to_sym)
-    PostRevisor.track_topic_field(field.to_sym) do |changes, value|
-      next if value.nil?
-      unless changes.user.admin? && IsbfLearning.learning_topic?(changes.topic)
-        raise Discourse::InvalidAccess
+  IsbfLearning.resource_libraries.each do |library|
+    { library::GROUP_FIELD => :string, library::FILES_FIELD => :json,
+      library::LINK_FIELD => :string, library::DESCRIPTION_FIELD => :string,
+      library::CONTRIBUTOR_FIELD => :string }.each do |field, type|
+      register_topic_custom_field_type(field, type, max_length: 4096)
+      add_permitted_post_create_param(field.to_sym, :string)
+      NewPostManager.add_plugin_payload_attribute(field.to_sym)
+      # Topic fields use the revision tracker; the native post hook still requires a callable.
+      add_permitted_post_update_param(field.to_sym) { |_post, _value| }
+      PostRevisor.track_topic_field(field.to_sym) do |changes, value|
+        next if value.nil?
+        unless library.can_manage?(changes.guardian) && IsbfLearning.resource_library_for_topic(changes.topic) == library
+          raise Discourse::InvalidAccess
+        end
+        normalized = field == library::FILES_FIELD ? library.file_ids(value) : value.to_s
+        normalized = IsbfLearning.external_link(normalized) if field == library::LINK_FIELD
+        normalized = IsbfLearning.description(value) if field == library::DESCRIPTION_FIELD
+        normalized = IsbfLearning.contributor(value, changes.topic.first_post.user) if field == library::CONTRIBUTOR_FIELD
+        if field == library::GROUP_FIELD
+          group = library == IsbfLearning ? IsbfLearning::Courses.find(normalized) : IsbfLibrary::Catalog.find_group(normalized)
+          raise Discourse::InvalidParameters.new(field) unless group
+        end
+        changes.record_change(field, changes.topic.custom_fields[field], normalized)
+        changes.topic.custom_fields[field] = normalized
       end
-      normalized = field == IsbfLearning::FILES_FIELD ? IsbfLearning.file_ids(value) : value.to_s
-      normalized = IsbfLearning.external_link(normalized) if field == IsbfLearning::LINK_FIELD
-      normalized = IsbfLearning.description(value) if field == IsbfLearning::DESCRIPTION_FIELD
-      normalized = IsbfLearning.contributor(value, changes.topic.first_post.user) if field == IsbfLearning::CONTRIBUTOR_FIELD
-      if field == IsbfLearning::COURSE_FIELD && !IsbfLearning::Courses.find(normalized)
-        raise Discourse::InvalidParameters.new(field)
-      end
-      changes.record_change(field, changes.topic.custom_fields[field], normalized)
-      changes.topic.custom_fields[field] = normalized
-    end
-    %i[topic_view post].each do |serializer|
-      add_to_serializer(serializer, field.to_sym, include_condition: -> { scope.user.present? }) do
-        topic = object.respond_to?(:topic) ? object.topic : object
-        topic.custom_fields[field] if IsbfLearning.learning_topic?(topic)
+      %i[topic_view post].each do |serializer|
+        add_to_serializer(serializer, field.to_sym, include_condition: -> { scope.user.present? }) do
+          topic = object.respond_to?(:topic) ? object.topic : object
+          topic.custom_fields[field] if IsbfLearning.resource_library_for_topic(topic) == library
+        end
       end
     end
   end
@@ -50,45 +59,53 @@ after_initialize do
   module ::IsbfLearning::ResourceGuardian
     def can_create_topic_on_category?(category)
       id = category.is_a?(Category) ? category.id : category
-      return super unless IsbfLearning.category_id && id.to_i == IsbfLearning.category_id
-      SiteSetting.isbf_learning_enabled && user&.active? && (user.staff? || user.approved?) &&
+      library = IsbfLearning.resource_library_for_category(id)
+      return super unless library
+      library.enabled? && user&.active? && (user.staff? || user.approved?) &&
         !user.silenced? && !user.suspended? &&
-        (is_admin? || Category.topic_create_allowed(self).exists?(id: id))
+        (library.can_manage?(self) || Category.topic_create_allowed(self).exists?(id: id))
     end
 
     def can_see_topic?(topic, hide_deleted = true)
-      return false if IsbfLearning.learning_topic?(topic) && !user
+      return false if IsbfLearning.resource_library_for_topic(topic) && !user
       super
     end
 
     def can_move_topic_to_category?(category)
-      return false if category&.id == IsbfLearning.category_id && !is_admin?
+      id = category.is_a?(Category) ? category.id : category
+      library = IsbfLearning.resource_library_for_category(id)
+      return false if library && !library.can_manage?(self)
       super
     end
 
     def can_delete_topic?(topic)
-      return false if IsbfLearning.learning_topic?(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if library && !library.can_manage?(self)
       super
     end
 
     def can_recover_topic?(topic)
-      return false if IsbfLearning.learning_topic?(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if library && !library.can_manage?(self)
       super
     end
 
     def can_recover_post?(post)
       topic = post&.topic || (post && Topic.with_deleted.find_by(id: post.topic_id))
-      return false if post&.is_first_post? && IsbfLearning.learning_topic?(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if post&.is_first_post? && library && !library.can_manage?(self)
       super
     end
 
     def can_edit_post?(post)
-      return false if post&.is_first_post? && IsbfLearning.learning_topic?(post.topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(post&.topic)
+      return false if post&.is_first_post? && library && !library.can_manage?(self)
       super
     end
 
     def can_edit_topic?(topic)
-      return false if IsbfLearning.learning_topic?(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if library && !library.can_manage?(self)
       super
     end
   end
@@ -103,29 +120,26 @@ after_initialize do
 
   module ::IsbfLearning::ResourceRevisor
     def revise!(editor, fields, opts = {}, &block)
-      if IsbfLearning.learning_topic?(@post.topic) && @post.is_first_post?
-        raise Discourse::InvalidAccess unless editor.admin?
+      library = IsbfLearning.resource_library_for_topic(@post.topic)
+      if library && @post.is_first_post?
+        raise Discourse::InvalidAccess unless library.can_manage?(editor.guardian)
+        IsbfLearning.ensure_scope_fields!(library, fields)
         payload = {
-          title: fields[:title] || @post.topic.title,
-          raw: fields[:raw] || @post.raw,
+          title: fields[:title] || @post.topic.title, raw: fields[:raw] || @post.raw,
           category: fields[:category_id] || @post.topic.category_id,
-          isbf_learning_course_id: fields[IsbfLearning::COURSE_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::COURSE_FIELD],
-          isbf_learning_files: fields[IsbfLearning::FILES_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::FILES_FIELD],
-          isbf_learning_link: fields[IsbfLearning::LINK_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::LINK_FIELD],
-          isbf_learning_description: fields[IsbfLearning::DESCRIPTION_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::DESCRIPTION_FIELD],
-          isbf_learning_contributor: fields[IsbfLearning::CONTRIBUTOR_FIELD.to_sym] || @post.topic.custom_fields[IsbfLearning::CONTRIBUTOR_FIELD],
         }
-        raise Discourse::InvalidParameters.new("category_id") unless payload[:category].to_i == IsbfLearning.category_id
-        IsbfLearning.validate_payload!(editor, payload)
-      elsif fields.any? { |key, value| IsbfLearning::RESOURCE_FIELDS.include?(key.to_s) && !value.nil? }
-        raise Discourse::InvalidParameters.new("isbf_learning")
+        library::RESOURCE_FIELDS.each do |field|
+          payload[field.to_sym] = fields[field.to_sym] || @post.topic.custom_fields[field]
+        end
+        raise Discourse::InvalidParameters.new("category_id") unless payload[:category].to_i == library.category_id
+        library.validate_payload!(editor, payload)
+      elsif fields.any? { |key, value| IsbfLearning.all_resource_fields.include?(key.to_s) && !value.nil? }
+        raise Discourse::InvalidParameters.new("resource_library")
       end
-      fields = fields.reject do |key, value|
-        value.nil? && IsbfLearning::RESOURCE_FIELDS.include?(key.to_s)
-      end
+      fields = fields.reject { |key, value| value.nil? && IsbfLearning.all_resource_fields.include?(key.to_s) }
       PluginStoreRow.transaction do
         result = super(editor, fields, opts, &block)
-        if result && IsbfLearning.learning_topic?(@post.topic) && @post.is_first_post?
+        if result && library == IsbfLearning && @post.is_first_post?
           IsbfLearning.file_ids(@post.topic.custom_fields[IsbfLearning::FILES_FIELD] || []).each do |id|
             IsbfLearning::Files.mark_bound!(id)
           end
@@ -137,14 +151,14 @@ after_initialize do
   PostRevisor.prepend(IsbfLearning::ResourceRevisor)
 
   NewPostManager.add_handler(-100) do |manager|
-    fields = IsbfLearning::RESOURCE_FIELDS
-    supplied = fields.any? { |field| manager.args[field.to_sym].present? }
-    resource = manager.args[:category].to_i == IsbfLearning.category_id && manager.args[:topic_id].blank?
+    library = IsbfLearning.resource_library_for_category(manager.args[:category])
+    supplied = IsbfLearning.all_resource_fields.any? { |field| manager.args[field.to_sym].present? }
+    resource = library && manager.args[:topic_id].blank?
     next unless supplied || resource
     begin
-      raise Discourse::InvalidParameters.new("isbf_learning") unless resource
-      IsbfLearning.validate_payload!(manager.user, manager.args)
-      unless manager.user.admin?
+      raise Discourse::InvalidParameters.new("resource_library") unless resource
+      library.validate_payload!(manager.user, manager.args)
+      unless library.can_manage?(manager.user.guardian)
         post = Post.new(raw: manager.args[:raw], user: manager.user, post_number: 1)
         PostValidator.new(skip_topic: true).validate(post)
         if post.errors.present?
@@ -154,53 +168,65 @@ after_initialize do
         end
         manager.enqueue(:category)
       end
-    rescue Discourse::InvalidParameters, Discourse::InvalidAccess => error
+    rescue Discourse::InvalidParameters, Discourse::InvalidAccess
       result = NewPostResult.new(:create_post, false)
-      result.errors.add(:base, I18n.t("isbf_learning.invalid"))
+      result.errors.add(:base, I18n.t(library == IsbfLibrary ? "isbf_library.invalid" : "isbf_learning.invalid"))
       result
     end
   end
 
   on(:before_create_post) do |post, options|
     next if post.user&.is_system_user?
-    supplied = IsbfLearning::RESOURCE_FIELDS.any? { |field| options[field.to_sym].present? }
-    resource = options[:category].to_i == IsbfLearning.category_id && options[:topic_id].blank?
+    library = IsbfLearning.resource_library_for_category(options[:category])
+    supplied = IsbfLearning.all_resource_fields.any? { |field| options[field.to_sym].present? }
+    resource = library && options[:topic_id].blank?
     next unless supplied || resource
-    raise Discourse::InvalidParameters.new("isbf_learning") unless resource
-    IsbfLearning.validate_payload!(post.user, options)
+    raise Discourse::InvalidParameters.new("resource_library") unless resource
+    library.validate_payload!(post.user, options)
   end
 
   on(:before_create_topic) do |topic, creator|
     next if creator.user.is_system_user?
-    supplied = IsbfLearning::RESOURCE_FIELDS.any? { |field| creator.opts[field.to_sym].present? }
-    next unless supplied || IsbfLearning.learning_topic?(topic)
-    raise Discourse::InvalidParameters.new("isbf_learning") unless IsbfLearning.learning_topic?(topic)
-    unless creator.user.admin? || (creator.opts[:reviewed_queued_post] && creator.guardian.is_admin?)
+    library = IsbfLearning.resource_library_for_topic(topic)
+    supplied = IsbfLearning.all_resource_fields.any? { |field| creator.opts[field.to_sym].present? }
+    next unless supplied || library
+    raise Discourse::InvalidParameters.new("resource_library") unless library
+    unless library.can_manage?(creator.user.guardian) || (creator.opts[:reviewed_queued_post] && library.can_review?(creator.guardian))
       raise Discourse::InvalidAccess
     end
-    course, files = IsbfLearning.validate_payload!(creator.user, creator.opts)
-    topic.custom_fields[IsbfLearning::COURSE_FIELD] = course["id"]
-    topic.custom_fields[IsbfLearning::FILES_FIELD] = files
-    if creator.opts[IsbfLearning::LINK_FIELD.to_sym].present?
-      topic.custom_fields[IsbfLearning::LINK_FIELD] = IsbfLearning.external_link(creator.opts[IsbfLearning::LINK_FIELD.to_sym])
+    group, files = library.validate_payload!(creator.user, creator.opts)
+    topic.custom_fields[library::GROUP_FIELD] = group["id"]
+    topic.custom_fields[library::FILES_FIELD] = files
+    if creator.opts[library::LINK_FIELD.to_sym].present?
+      topic.custom_fields[library::LINK_FIELD] = IsbfLearning.external_link(creator.opts[library::LINK_FIELD.to_sym])
     end
-    topic.custom_fields[IsbfLearning::DESCRIPTION_FIELD] = IsbfLearning.description(creator.opts[IsbfLearning::DESCRIPTION_FIELD.to_sym])
-    topic.custom_fields[IsbfLearning::CONTRIBUTOR_FIELD] = IsbfLearning.contributor(creator.opts[IsbfLearning::CONTRIBUTOR_FIELD.to_sym], creator.user)
-    files.each { |id| IsbfLearning::Files.mark_bound!(id) }
+    topic.custom_fields[library::DESCRIPTION_FIELD] = IsbfLearning.description(creator.opts[library::DESCRIPTION_FIELD.to_sym])
+    topic.custom_fields[library::CONTRIBUTOR_FIELD] = IsbfLearning.contributor(creator.opts[library::CONTRIBUTOR_FIELD.to_sym], creator.user)
+    files.each { |id| IsbfLearning::Files.mark_bound!(id) } if library == IsbfLearning
   end
 
-  add_to_serializer(:site, :isbf_learning, include_condition: -> { SiteSetting.isbf_learning_enabled && IsbfLearning.category_id }) do
+  add_to_serializer(:site, :isbf_learning, include_condition: -> { IsbfLearning.enabled? }) do
     { category_id: IsbfLearning.category_id, grades: IsbfLearning::GRADES, link_sharing: true, course_requests: true, resource_description: true, resource_contributor: true, resource_admin_management: true }
+  end
+  add_to_serializer(:site, :isbf_library, include_condition: -> { IsbfLibrary.enabled? }) do
+    { category_id: IsbfLibrary.category_id, link_sharing: true, catalog_requests: true, resource_description: true, resource_contributor: true, resource_admin_management: true }
   end
 
   TopicQuery.add_custom_filter(:isbf_learning_community_exclusion) do |topics, _query|
-    id = IsbfLearning.category_id
-    id ? topics.where.not(topics: { category_id: id }) : topics
+    ids = IsbfLearning.resource_libraries.filter_map(&:category_id)
+    ids.empty? ? topics : topics.where.not(topics: { category_id: ids })
   end
 
   register_search_advanced_filter(/\Aisbf-learning:library\z/) do |posts, _|
     id = IsbfLearning.category_id
     id ? posts.where(post_number: 1, topics: { category_id: id, visible: true, archetype: Archetype.default }) : posts.none
+  end
+  register_search_advanced_filter(/\Aisbf-library:library\z/) do |posts, _|
+    id = IsbfLibrary.category_id
+    categories = IsbfLibrary::Catalog.categories.map { |entry| entry["id"] }
+    groups = IsbfLibrary::Catalog.groups.select { |entry| categories.include?(entry["category_id"]) }.map { |entry| entry["id"] }
+    id ? posts.where(post_number: 1, topics: { category_id: id, visible: true, archetype: Archetype.default })
+      .joins(topic: :_custom_fields).where(topic_custom_fields: { name: IsbfLibrary::GROUP_FIELD, value: groups }) : posts.none
   end
 
   IsbfLearning::Engine.routes.draw do
@@ -213,7 +239,18 @@ after_initialize do
     post "/uploads" => "library#upload"
     get "/files/:id" => "library#download"
   end
+  IsbfLibrary::Engine.routes.draw do
+    get "/" => "library#page"
+    get "/categories" => "library#categories"
+    post "/categories" => "library#create_category"
+    get "/groups" => "library#groups"
+    post "/groups" => "library#create_group"
+    get "/resources" => "library#resources"
+    post "/resources" => "library#create_resource"
+    delete "/resources/:id" => "library#destroy_resource"
+  end
   Discourse::Application.routes.append do
     mount ::IsbfLearning::Engine, at: "/isbf/learning"
+    mount ::IsbfLibrary::Engine, at: "/isbf/library"
   end
 end
