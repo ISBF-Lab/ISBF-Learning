@@ -4,8 +4,8 @@ module IsbfLearning
   module AdminReviewScope
     def viewable_by(user, **options)
       scope = super
-      return scope if user&.admin?
       IsbfLearning.resource_libraries.each do |library|
+        next if user && library.can_review?(user.guardian)
         scope = scope.where(
           "NOT (reviewables.type = :type AND (COALESCE(reviewables.category_id, 0) = :category_id OR COALESCE(reviewables.payload ->> :group_field, '') <> ''))",
           type: "ReviewableQueuedPost", category_id: library.category_id || -1,
@@ -20,8 +20,8 @@ module IsbfLearning
     private
 
     def can_review_target?(guardian)
-      if IsbfLearning.learning_reviewable?(self)
-        return false unless guardian.is_admin? && category && guardian.can_see_category?(category)
+      if library = IsbfLearning.reviewable_resource_library(self)
+        return false unless library.can_review?(guardian) && category && guardian.can_see_category?(category)
         return false if guardian.user.silenced? || guardian.user.suspended?
       end
       super

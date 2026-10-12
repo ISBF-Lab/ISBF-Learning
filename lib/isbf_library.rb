@@ -1,6 +1,14 @@
 # frozen_string_literal: true
 
 module IsbfLibrary
+  def self.can_manage?(guardian)
+    guardian.is_admin?
+  end
+
+  def self.can_review?(guardian)
+    guardian.is_admin?
+  end
+
   STORE = "isbf-library"
   GROUP_FIELD = "isbf_library_group_id"
   FILES_FIELD = "isbf_library_files"

@@ -33,7 +33,7 @@ after_initialize do
       add_permitted_post_update_param(field.to_sym) { |_post, _value| }
       PostRevisor.track_topic_field(field.to_sym) do |changes, value|
         next if value.nil?
-        unless changes.user.admin? && IsbfLearning.resource_library_for_topic(changes.topic) == library
+        unless library.can_manage?(changes.guardian) && IsbfLearning.resource_library_for_topic(changes.topic) == library
           raise Discourse::InvalidAccess
         end
         normalized = field == library::FILES_FIELD ? library.file_ids(value) : value.to_s
@@ -63,7 +63,7 @@ after_initialize do
       return super unless library
       library.enabled? && user&.active? && (user.staff? || user.approved?) &&
         !user.silenced? && !user.suspended? &&
-        (is_admin? || Category.topic_create_allowed(self).exists?(id: id))
+        (library.can_manage?(self) || Category.topic_create_allowed(self).exists?(id: id))
     end
 
     def can_see_topic?(topic, hide_deleted = true)
@@ -73,33 +73,39 @@ after_initialize do
 
     def can_move_topic_to_category?(category)
       id = category.is_a?(Category) ? category.id : category
-      return false if IsbfLearning.resource_library_for_category(id) && !is_admin?
+      library = IsbfLearning.resource_library_for_category(id)
+      return false if library && !library.can_manage?(self)
       super
     end
 
     def can_delete_topic?(topic)
-      return false if IsbfLearning.resource_library_for_topic(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if library && !library.can_manage?(self)
       super
     end
 
     def can_recover_topic?(topic)
-      return false if IsbfLearning.resource_library_for_topic(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if library && !library.can_manage?(self)
       super
     end
 
     def can_recover_post?(post)
       topic = post&.topic || (post && Topic.with_deleted.find_by(id: post.topic_id))
-      return false if post&.is_first_post? && IsbfLearning.resource_library_for_topic(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if post&.is_first_post? && library && !library.can_manage?(self)
       super
     end
 
     def can_edit_post?(post)
-      return false if post&.is_first_post? && IsbfLearning.resource_library_for_topic(post.topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(post&.topic)
+      return false if post&.is_first_post? && library && !library.can_manage?(self)
       super
     end
 
     def can_edit_topic?(topic)
-      return false if IsbfLearning.resource_library_for_topic(topic) && !is_admin?
+      library = IsbfLearning.resource_library_for_topic(topic)
+      return false if library && !library.can_manage?(self)
       super
     end
   end
@@ -116,7 +122,7 @@ after_initialize do
     def revise!(editor, fields, opts = {}, &block)
       library = IsbfLearning.resource_library_for_topic(@post.topic)
       if library && @post.is_first_post?
-        raise Discourse::InvalidAccess unless editor.admin?
+        raise Discourse::InvalidAccess unless library.can_manage?(editor.guardian)
         IsbfLearning.ensure_scope_fields!(library, fields)
         payload = {
           title: fields[:title] || @post.topic.title, raw: fields[:raw] || @post.raw,
@@ -152,7 +158,7 @@ after_initialize do
     begin
       raise Discourse::InvalidParameters.new("resource_library") unless resource
       library.validate_payload!(manager.user, manager.args)
-      unless manager.user.admin?
+      unless library.can_manage?(manager.user.guardian)
         post = Post.new(raw: manager.args[:raw], user: manager.user, post_number: 1)
         PostValidator.new(skip_topic: true).validate(post)
         if post.errors.present?
@@ -185,7 +191,7 @@ after_initialize do
     supplied = IsbfLearning.all_resource_fields.any? { |field| creator.opts[field.to_sym].present? }
     next unless supplied || library
     raise Discourse::InvalidParameters.new("resource_library") unless library
-    unless creator.user.admin? || (creator.opts[:reviewed_queued_post] && creator.guardian.is_admin?)
+    unless library.can_manage?(creator.user.guardian) || (creator.opts[:reviewed_queued_post] && library.can_review?(creator.guardian))
       raise Discourse::InvalidAccess
     end
     group, files = library.validate_payload!(creator.user, creator.opts)

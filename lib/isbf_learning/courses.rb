@@ -15,8 +15,12 @@ module IsbfLearning
     def self.normalize(name:, grade:)
       raise Discourse::InvalidParameters.new("name") unless name.is_a?(String)
       name = name.strip.unicode_normalize(:nfkc)
-      raise Discourse::InvalidParameters.new("name") unless name.length.between?(1, 80)
-      raise Discourse::InvalidParameters.new("grade") unless grade.to_s.match?(/\A[1-4]\z/)
+      unless name.length.between?(1, 80)
+        raise Discourse::InvalidParameters.new("name")
+      end
+      unless grade.to_s.match?(/\A[1-4]\z/)
+        raise Discourse::InvalidParameters.new("grade")
+      end
       { "name" => name, "grade" => grade.to_i }
     end
 
@@ -35,19 +39,41 @@ module IsbfLearning
       IsbfLearning.ensure_can_submit!(user, Guardian.new(user))
       attributes = normalize(name: name, grade: grade)
       synchronize do
-        raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.duplicate_course")) if matching(attributes)
-        pending = ReviewableIsbfLearningCourse.pending.where(
-          created_by_id: user.id, category_id: IsbfLearning.category_id,
-        ).detect do |reviewable|
-          stored = normalize(name: reviewable.payload["course_name"], grade: reviewable.payload["grade"])
-          stored["grade"] == attributes["grade"] && stored["name"].casecmp?(attributes["name"])
+        if matching(attributes)
+          raise Discourse::InvalidParameters.new(
+                  I18n.t("isbf_learning.duplicate_course")
+                )
         end
+        pending =
+          ReviewableIsbfLearningCourse
+            .pending
+            .where(
+              created_by_id: user.id,
+              category_id: IsbfLearning.category_id
+            )
+            .detect do |reviewable|
+              stored =
+                normalize(
+                  name: reviewable.payload["course_name"],
+                  grade: reviewable.payload["grade"]
+                )
+              stored["grade"] == attributes["grade"] &&
+                stored["name"].casecmp?(attributes["name"])
+            end
         next pending if pending
-        reviewable = ReviewableIsbfLearningCourse.new(
-          created_by: user, target_created_by: user, category_id: IsbfLearning.category_id,
-          payload: { "course_name" => attributes["name"], "grade" => attributes["grade"] },
-          reviewable_by_moderator: true, force_review: true, potential_spam: false,
-        )
+        reviewable =
+          ReviewableIsbfLearningCourse.new(
+            created_by: user,
+            target_created_by: user,
+            category_id: IsbfLearning.category_id,
+            payload: {
+              "course_name" => attributes["name"],
+              "grade" => attributes["grade"]
+            },
+            reviewable_by_moderator: true,
+            force_review: true,
+            potential_spam: false
+          )
         reviewable.created_new!
         reviewable.save!
         reviewable
@@ -56,29 +82,53 @@ module IsbfLearning
 
     # Called inside ReviewableIsbfLearningCourse#perform's shared catalog lock.
     def self.approve_locked(user, name:, grade:)
-      ensure_staff!(user)
+      ensure_staff!(user, review: true)
       add(normalize(name: name, grade: grade), reuse_existing: true)
     end
 
-    def self.ensure_staff!(user)
-      raise Discourse::InvalidAccess unless user&.staff? && !user.silenced? && !user.suspended?
+    def self.ensure_staff!(user, review: false)
+      permitted =
+        user &&
+          (
+            if review
+              IsbfLearning.can_review?(user.guardian)
+            else
+              IsbfLearning.can_manage?(user.guardian)
+            end
+          )
+      permitted ||=
+        user&.staff? &&
+          !(
+            SiteSetting.respond_to?(:academy_roles_enabled?) &&
+              SiteSetting.academy_roles_enabled?
+          )
+      unless permitted && !user.silenced? && !user.suspended?
+        raise Discourse::InvalidAccess
+      end
     end
 
     def self.matching(attributes)
       list.find do |course|
-        course["grade"] == attributes["grade"] && course["name"].casecmp?(attributes["name"])
+        course["grade"] == attributes["grade"] &&
+          course["name"].casecmp?(attributes["name"])
       end
     end
 
     def self.add(attributes, reuse_existing: false)
       if existing = matching(attributes)
         return existing if reuse_existing
-        raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.duplicate_course"))
+        raise Discourse::InvalidParameters.new(
+                I18n.t("isbf_learning.duplicate_course")
+              )
       end
       courses = list
-      raise Discourse::InvalidParameters.new("courses") if courses.length >= 1000
+      if courses.length >= 1000
+        raise Discourse::InvalidParameters.new("courses")
+      end
       course = attributes.merge("id" => SecureRandom.uuid)
-      raise StorageError unless PluginStore.set(STORE, "courses", courses + [course])
+      unless PluginStore.set(STORE, "courses", courses + [course])
+        raise StorageError
+      end
       course.with_indifferent_access
     end
 

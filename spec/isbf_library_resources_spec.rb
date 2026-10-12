@@ -340,7 +340,7 @@ RSpec.describe "ISBF library resources and native permissions", type: :request d
     expect(response.parsed_body.fetch("pending")).to eq(true)
     approval = ReviewableQueuedPost.order(:id).last.perform(admin, :approve_post)
     expect(approval.success?).to eq(true)
-    resource = approval.created_post
+    resource = approval.created_post.reload
     topic = resource.topic.reload
     topic_created_at = topic.created_at
     post_created_at = resource.created_at
