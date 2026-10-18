@@ -20,9 +20,12 @@ module IsbfLearning
 
     def self.grades
       labels = PluginStore.get(STORE, "grade_labels") || {}
-      GRADES.map do |grade|
-        grade.merge(label: labels[grade[:id].to_s].presence || grade[:label])
-      end
+      deleted = PluginStore.get(STORE, "deleted_grades") || {}
+      GRADES
+        .reject { |grade| deleted.key?(grade[:id].to_s) }
+        .map do |grade|
+          grade.merge(label: labels[grade[:id].to_s].presence || grade[:label])
+        end
     end
 
     def self.update(user, id, name:, grade:)
@@ -30,8 +33,8 @@ module IsbfLearning
       unless IsbfLearning.can_manage?(user.guardian)
         raise Discourse::InvalidAccess
       end
-      attributes = normalize(name: name, grade: grade)
       synchronize do
+        attributes = normalize(name: name, grade: grade)
         courses = list(include_deleted: true)
         course =
           courses.find do |entry|
@@ -57,8 +60,8 @@ module IsbfLearning
       unless IsbfLearning.can_manage?(user.guardian)
         raise Discourse::InvalidAccess
       end
-      attributes = normalize(name: name, grade: id)
       synchronize do
+        attributes = normalize(name: name, grade: id)
         if grades.any? { |grade|
              grade[:id] != id.to_i && grade[:label].casecmp?(attributes["name"])
            }
@@ -78,6 +81,9 @@ module IsbfLearning
         raise Discourse::InvalidParameters.new("name")
       end
       unless grade.to_s.match?(/\A[1-4]\z/)
+        raise Discourse::InvalidParameters.new("grade")
+      end
+      unless grades.any? { |entry| entry[:id] == grade.to_i }
         raise Discourse::InvalidParameters.new("grade")
       end
       { "name" => name, "grade" => grade.to_i }
@@ -112,14 +118,13 @@ module IsbfLearning
 
     def self.create(user, name:, grade:)
       ensure_staff!(user)
-      attributes = normalize(name: name, grade: grade)
-      synchronize { add(attributes) }
+      synchronize { add(normalize(name: name, grade: grade)) }
     end
 
     def self.request(user, name:, grade:)
       IsbfLearning.ensure_can_submit!(user, Guardian.new(user))
-      attributes = normalize(name: name, grade: grade)
       synchronize do
+        attributes = normalize(name: name, grade: grade)
         if matching(attributes)
           raise Discourse::InvalidParameters.new(
                   I18n.t("isbf_learning.duplicate_course")
@@ -133,6 +138,11 @@ module IsbfLearning
               category_id: IsbfLearning.category_id
             )
             .detect do |reviewable|
+              unless grades.any? { |entry|
+                       entry[:id].to_s == reviewable.payload["grade"].to_s
+                     }
+                next false
+              end
               stored =
                 normalize(
                   name: reviewable.payload["course_name"],

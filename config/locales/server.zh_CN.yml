@@ -6,6 +6,8 @@ zh_CN:
     isbf_library_enabled: "启用独立资料库（需开启 ISBF Learning 插件总开关）。"
     isbf_library_category_id: "资料库实际分类 ID，必须与课程资源分类不同。"
   isbf_learning:
+    directory_changed: "课程或分类内容已变化，请重新确认删除。"
+    directory_delete_failed: "删除失败，课程、分类及资料均未删除，请重试。"
     invalid_contributor_user: "请选择与该学号对应的已注册用户。"
     edit_failed: "资料保存失败，请重试。"
     invalid_contributor: "贡献者须为不超过 15 字的单行纯文本。"

@@ -40,6 +40,34 @@ module IsbfLearning
       )
     end
 
+    def deletion_plan
+      render json:
+               DirectoryDeletion.plan(
+                 current_user,
+                 kind: deletion_kind,
+                 id: params[:id]
+               )
+    end
+
+    def destroy_directory
+      render json:
+               DirectoryDeletion.delete(
+                 current_user,
+                 kind: deletion_kind,
+                 id: params[:id],
+                 confirmation_token: params[:confirmation_token],
+                 confirmation_count: params[:confirmation_count],
+                 cascade: params[:cascade]
+               )
+    rescue DirectoryDeletion::Changed
+      render_json_error(I18n.t("isbf_learning.directory_changed"), status: 409)
+    rescue StorageError
+      render_json_error(
+        I18n.t("isbf_learning.directory_delete_failed"),
+        status: 422
+      )
+    end
+
     def update_grade
       grade =
         Courses.update_grade(current_user, id: params[:id], name: params[:name])
@@ -392,6 +420,10 @@ module IsbfLearning
     end
 
     private
+
+    def deletion_kind
+      request.path.include?("/grades/") ? "grade" : "course"
+    end
 
     def check_category
       category = Category.find_by(id: IsbfLearning.category_id)
