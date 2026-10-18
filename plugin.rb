@@ -230,6 +230,33 @@ after_initialize do
   end
   PostRevisor.prepend(IsbfLearning::ResourceRevisor)
 
+  module ::IsbfLearning::CourseRevisionLock
+    def revise!(editor, fields, opts = {}, &block)
+      if @post.is_first_post? &&
+           IsbfLearning.resource_library_for_topic(@post.topic) == IsbfLearning
+        PluginStoreRow.transaction do
+          IsbfLearning::Courses.with_catalog_lock { super }
+        end
+      else
+        super
+      end
+    end
+  end
+  PostRevisor.prepend(IsbfLearning::CourseRevisionLock)
+
+  module ::IsbfLearning::CourseCreationLock
+    def transaction(&block)
+      if new_topic? &&
+           IsbfLearning.resource_library_for_category(opts[:category]) ==
+             IsbfLearning
+        super { IsbfLearning::Courses.with_catalog_lock(&block) }
+      else
+        super
+      end
+    end
+  end
+  PostCreator.prepend(IsbfLearning::CourseCreationLock)
+
   module ::IsbfLearning::ManagedResourceApproval
     def post_needs_approval?(manager)
       return super if manager.args[:email_auth_res_action] == :enqueue
@@ -428,6 +455,10 @@ after_initialize do
     get "/courses" => "library#courses"
     post "/courses" => "library#create_course"
     put "/courses/:id" => "library#update_course"
+    get "/courses/:id/deletion-plan" => "library#deletion_plan"
+    delete "/courses/:id" => "library#destroy_directory"
+    get "/grades/:id/deletion-plan" => "library#deletion_plan"
+    delete "/grades/:id" => "library#destroy_directory"
     put "/grades/:id" => "library#update_grade"
     get "/contributions" => "library#contributions"
     get "/contributor-users" => "library#contributor_users"

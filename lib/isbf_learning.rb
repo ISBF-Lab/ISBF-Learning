@@ -385,4 +385,5 @@ module IsbfLearning
 end
 
 require_relative "isbf_learning/courses"
+require_relative "isbf_learning/directory_deletion"
 require_relative "isbf_learning/files"
