@@ -29,12 +29,16 @@ module IsbfLearning
   DESCRIPTION_LIMIT = 300
   CONTRIBUTOR_FIELD = "isbf_learning_contributor"
   CONTRIBUTOR_LIMIT = 15
+  STUDENT_NUMBER_FIELD = "isbf_learning_student_number"
+  CONTRIBUTOR_USER_FIELD = "isbf_learning_contributor_user_id"
   RESOURCE_FIELDS = [
     COURSE_FIELD,
     FILES_FIELD,
     LINK_FIELD,
     DESCRIPTION_FIELD,
-    CONTRIBUTOR_FIELD
+    CONTRIBUTOR_FIELD,
+    STUDENT_NUMBER_FIELD,
+    CONTRIBUTOR_USER_FIELD
   ].freeze
   GRADES = (1..4).map { |id| { id: id, label: %w[大一 大二 大三 大四][id - 1] } }.freeze
   class StorageError < StandardError
@@ -63,7 +67,9 @@ module IsbfLearning
   end
 
   def self.resource_library_for_topic(topic)
-    resource_library_for_category(topic.category_id) if topic && !topic.private_message?
+    if topic && !topic.private_message?
+      resource_library_for_category(topic.category_id)
+    end
   end
 
   def self.ensure_scope_fields!(library, options)
@@ -75,9 +81,10 @@ module IsbfLearning
 
   def self.reviewable_resource_library(reviewable)
     return unless reviewable.is_a?(ReviewableQueuedPost)
-    resource_library_for_category(reviewable.category_id) || resource_libraries.find do |library|
-      reviewable.payload&.[](library::GROUP_FIELD).present?
-    end
+    resource_library_for_category(reviewable.category_id) ||
+      resource_libraries.find do |library|
+        reviewable.payload&.[](library::GROUP_FIELD).present?
+      end
   end
 
   def self.learning_topic?(topic)
@@ -157,6 +164,42 @@ module IsbfLearning
       I18n.t("isbf_learning.unknown_contributor")
   end
 
+  def self.student_number(value)
+    return "" if value.nil?
+    unless value.is_a?(String) && value.length <= 64 &&
+             !value.match?(/[\s\p{Cc}]/)
+      raise Discourse::InvalidParameters.new("student_number")
+    end
+    value
+  end
+
+  def self.contributor_users(number)
+    number = student_number(number)
+    if number.blank? || !defined?(DiscourseAcademyRoles::StudentRegistration)
+      return User.none
+    end
+    ids =
+      DiscourseAcademyRoles::StudentRegistration
+        .where(student_number: number)
+        .where.not(user_id: nil)
+        .select(:user_id)
+    User.real.where(id: ids, staged: false)
+  end
+
+  def self.contribution_identity!(actor, options)
+    number = student_number(options[STUDENT_NUMBER_FIELD.to_sym])
+    value = options[CONTRIBUTOR_USER_FIELD.to_sym]
+    return number, "" if value.nil? || value == ""
+    unless can_manage?(actor.guardian) &&
+             value.to_s.match?(/\A[1-9]\d{0,18}\z/) &&
+             contributor_users(number).exists?(id: value)
+      raise Discourse::InvalidParameters.new(
+              I18n.t("isbf_learning.invalid_contributor_user")
+            )
+    end
+    [number, value.to_s]
+  end
+
   def self.contributor(value, user)
     default = contributor_name(user)
     return default if value.nil? || (value.is_a?(String) && value.strip.empty?)
@@ -189,17 +232,29 @@ module IsbfLearning
     "#{body}\n\n#{plain}"
   end
 
-  def self.validate_payload!(user, options)
+  def self.validate_payload!(
+    user,
+    options,
+    contributor_user: user,
+    allow_existing_files: false
+  )
     ensure_can_submit!(user, Guardian.new(user))
     ensure_scope_fields!(self, options)
     description(options[DESCRIPTION_FIELD.to_sym])
-    contributor(options[CONTRIBUTOR_FIELD.to_sym], user)
+    contributor(options[CONTRIBUTOR_FIELD.to_sym], contributor_user)
+    if options[STUDENT_NUMBER_FIELD.to_sym].present? ||
+         options[CONTRIBUTOR_USER_FIELD.to_sym].present?
+      raise Discourse::InvalidAccess unless can_manage?(user.guardian)
+      contribution_identity!(user, options)
+    end
     course = Courses.find(options[COURSE_FIELD.to_sym])
     ids = file_ids(options[FILES_FIELD.to_sym])
     raw = options[:raw].to_s
     if options[LINK_FIELD.to_sym].present?
       external_link(options[LINK_FIELD.to_sym])
-      raise Discourse::InvalidParameters.new(FILES_FIELD) unless ids.empty?
+      unless ids.empty? || allow_existing_files
+        raise Discourse::InvalidParameters.new(FILES_FIELD)
+      end
     end
     if !course || options[:title].to_s.strip.blank? ||
          options[:title].to_s.include?("[isbf-untitled:") ||
@@ -266,8 +321,15 @@ module IsbfLearning
     can_manage?(guardian) || file[:owner_id] == user.id
   end
 
-  def self.resource(topic, guardian)
-    course = Courses.find(topic.custom_fields[COURSE_FIELD])
+  def self.resource(topic, guardian, courses: nil)
+    course =
+      (
+        if courses
+          courses[topic.custom_fields[COURSE_FIELD]]
+        else
+          Courses.find(topic.custom_fields[COURSE_FIELD])
+        end
+      )
     return unless course && visible_resource?(topic, guardian)
     post = topic.first_post
     link = topic.custom_fields[LINK_FIELD].presence
@@ -276,13 +338,13 @@ module IsbfLearning
         file = Files.metadata(id)
         file&.slice(:id, :name, :size, :url)
       end
-    {
+    data = {
       id: topic.id,
       title: topic.title,
       url: topic.relative_url,
       description:
         (
-          if link
+          if link || topic.custom_fields[DESCRIPTION_FIELD].present?
             description(topic.custom_fields[DESCRIPTION_FIELD])
           else
             PrettyText.excerpt(
@@ -300,6 +362,7 @@ module IsbfLearning
         topic.custom_fields[CONTRIBUTOR_FIELD].presence ||
           contributor_name(post.user),
       can_delete: can_manage?(guardian) && guardian.can_delete_topic?(topic),
+      can_edit: can_manage?(guardian) && guardian.can_edit_post?(post),
       author:
         post.user &&
           {
@@ -309,8 +372,15 @@ module IsbfLearning
           },
       files: files,
       links: link ? [external_link(link)] : links(post.raw),
-      link_only: link.present?
+      link_only: link.present? && files.empty?
     }
+    if can_manage?(guardian)
+      data[:student_number] = topic.custom_fields[STUDENT_NUMBER_FIELD] || ""
+      data[:contributor_user_id] = topic.custom_fields[
+        CONTRIBUTOR_USER_FIELD
+      ].presence&.to_i
+    end
+    data
   end
 end
 

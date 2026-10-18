@@ -4,18 +4,77 @@ require "securerandom"
 
 module IsbfLearning
   module Courses
-    def self.list
-      (PluginStore.get(STORE, "courses") || []).map(&:with_indifferent_access)
+    def self.list(include_deleted: false)
+      courses =
+        (PluginStore.get(STORE, "courses") || []).map(&:with_indifferent_access)
+      if include_deleted
+        courses
+      else
+        courses.reject { |course| course["deleted_at"].present? }
+      end
     end
 
     def self.find(id)
       list.find { |course| course["id"] == id.to_s }
     end
 
+    def self.grades
+      labels = PluginStore.get(STORE, "grade_labels") || {}
+      GRADES.map do |grade|
+        grade.merge(label: labels[grade[:id].to_s].presence || grade[:label])
+      end
+    end
+
+    def self.update(user, id, name:, grade:)
+      IsbfLearning.ensure_can_submit!(user, user.guardian)
+      unless IsbfLearning.can_manage?(user.guardian)
+        raise Discourse::InvalidAccess
+      end
+      attributes = normalize(name: name, grade: grade)
+      synchronize do
+        courses = list(include_deleted: true)
+        course =
+          courses.find do |entry|
+            entry["id"] == id.to_s && entry["deleted_at"].blank?
+          end
+        raise Discourse::NotFound unless course
+        if list.any? { |entry|
+             entry["id"] != id.to_s && entry["grade"] == attributes["grade"] &&
+               entry["name"].casecmp?(attributes["name"])
+           }
+          raise Discourse::InvalidParameters.new(
+                  I18n.t("isbf_learning.duplicate_course")
+                )
+        end
+        course.merge!(attributes)
+        raise StorageError unless PluginStore.set(STORE, "courses", courses)
+        course
+      end
+    end
+
+    def self.update_grade(user, id:, name:)
+      IsbfLearning.ensure_can_submit!(user, user.guardian)
+      unless IsbfLearning.can_manage?(user.guardian)
+        raise Discourse::InvalidAccess
+      end
+      attributes = normalize(name: name, grade: id)
+      synchronize do
+        if grades.any? { |grade|
+             grade[:id] != id.to_i && grade[:label].casecmp?(attributes["name"])
+           }
+          raise Discourse::InvalidParameters.new("name")
+        end
+        labels = PluginStore.get(STORE, "grade_labels") || {}
+        labels[id.to_s] = attributes["name"]
+        raise StorageError unless PluginStore.set(STORE, "grade_labels", labels)
+        { id: id.to_i, label: attributes["name"] }
+      end
+    end
+
     def self.normalize(name:, grade:)
       raise Discourse::InvalidParameters.new("name") unless name.is_a?(String)
       name = name.strip.unicode_normalize(:nfkc)
-      unless name.length.between?(1, 80)
+      unless name.length.between?(1, 80) && !name.match?(/[\p{Cc}]/)
         raise Discourse::InvalidParameters.new("name")
       end
       unless grade.to_s.match?(/\A[1-4]\z/)
@@ -26,7 +85,29 @@ module IsbfLearning
 
     # Hold the catalog mutex through the outer review transaction's commit.
     def self.synchronize(&block)
-      DistributedMutex.synchronize("isbf-learning-courses", &block)
+      DistributedMutex.synchronize("isbf-learning-courses") do
+        with_catalog_lock(&block)
+      end
+    end
+
+    def self.with_catalog_lock
+      result = nil
+      PluginStoreRow.transaction(requires_new: true) do
+        scope = PluginStoreRow.where(plugin_name: STORE, key: "courses")
+        row =
+          scope.first ||
+            scope.create_or_find_by!({}) do |record|
+              record.type_name = "JSON"
+              record.value = "[]"
+            end
+        row.lock!
+        result = yield
+        # Native review failures can absorb a rollback in their nested transaction.
+        if result.respond_to?(:success?) && !result.success?
+          raise ActiveRecord::Rollback
+        end
+      end
+      result
     end
 
     def self.create(user, name:, grade:)
@@ -121,10 +202,8 @@ module IsbfLearning
                 I18n.t("isbf_learning.duplicate_course")
               )
       end
-      courses = list
-      if courses.length >= 1000
-        raise Discourse::InvalidParameters.new("courses")
-      end
+      courses = list(include_deleted: true)
+      raise Discourse::InvalidParameters.new("courses") if list.length >= 1000
       course = attributes.merge("id" => SecureRandom.uuid)
       unless PluginStore.set(STORE, "courses", courses + [course])
         raise StorageError

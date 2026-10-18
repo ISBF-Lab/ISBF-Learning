@@ -6,6 +6,8 @@ en:
     isbf_library_enabled: "Enable the independent resource library (requires the ISBF Learning plugin)."
     isbf_library_category_id: "Resource library category ID, different from the course-resource category."
   isbf_learning:
+    invalid_contributor_user: "Select the registered user matching this student number."
+    edit_failed: "The resource could not be saved. Please try again."
     invalid_contributor: "Contributor must be a single-line name of at most 15 characters."
     unknown_contributor: "Unknown contributor"
     contributor_label: "Contributor"
