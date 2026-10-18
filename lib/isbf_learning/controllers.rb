@@ -11,13 +11,78 @@ module IsbfLearning
     requires_login
     requires_plugin "isbf-learning"
     before_action :check_category
+    skip_before_action :preload_json, only: :download
+    skip_before_action :check_xhr, only: :download
 
     def page
       render html: "".html_safe, layout: "application"
     end
 
     def courses
-      render json: { courses: Courses.list }
+      render json: { courses: Courses.list, grades: Courses.grades }
+    end
+
+    def update_course
+      course =
+        Courses.update(
+          current_user,
+          params[:id],
+          name: params[:name],
+          grade: params[:grade]
+        )
+      render json: { success: true, pending: false, course: course }
+    rescue Discourse::InvalidParameters => error
+      render_json_error(error.message, status: 422)
+    rescue StorageError
+      render_json_error(
+        I18n.t("isbf_learning.course_storage_error"),
+        status: 422
+      )
+    end
+
+    def update_grade
+      grade =
+        Courses.update_grade(current_user, id: params[:id], name: params[:name])
+      render json: { success: true, pending: false, grade: grade }
+    rescue Discourse::InvalidParameters => error
+      render_json_error(error.message, status: 422)
+    rescue StorageError
+      render_json_error(
+        I18n.t("isbf_learning.course_storage_error"),
+        status: 422
+      )
+    end
+
+    def contributions
+      page = params[:page].presence || "0"
+      unless page.to_s.match?(/\A\d{1,4}\z/)
+        raise Discourse::InvalidParameters.new("page")
+      end
+      render json: Contributions.list(current_user, guardian, page: page.to_i)
+    end
+
+    def contributor_users
+      raise Discourse::InvalidAccess unless IsbfLearning.can_manage?(guardian)
+      RateLimiter.new(
+        current_user,
+        "isbf-learning-contributor-lookup",
+        30,
+        1.minute
+      ).performed!
+      users = IsbfLearning.contributor_users(params[:student_number]).limit(10)
+      render json: {
+               users:
+                 users.map { |user|
+                   {
+                     id: user.id,
+                     username: user.username,
+                     name: user.name,
+                     avatar_template: user.avatar_template
+                   }
+                 }
+             }
+    rescue Discourse::InvalidParameters => error
+      render_json_error(error.message, status: 422)
     end
 
     def create_course
@@ -146,6 +211,10 @@ module IsbfLearning
       title = params[:title].is_a?(String) ? params[:title].strip : ""
       introduction = IsbfLearning.description(params[:description])
       contributor = IsbfLearning.contributor(params[:contributor], current_user)
+      if params[:student_number].present? ||
+           params[:contributor_user_id].present?
+        raise Discourse::InvalidAccess unless IsbfLearning.can_manage?(guardian)
+      end
       options = {
         title: title,
         raw: IsbfLearning.link_body(title, link, introduction),
@@ -155,7 +224,9 @@ module IsbfLearning
         isbf_learning_files: "[]",
         isbf_learning_link: link,
         isbf_learning_description: introduction,
-        isbf_learning_contributor: contributor
+        isbf_learning_contributor: contributor,
+        isbf_learning_student_number: params[:student_number],
+        isbf_learning_contributor_user_id: params[:contributor_user_id]
       }
       IsbfLearning.validate_payload!(current_user, options)
       creator = TopicCreator.new(current_user, guardian, options)
@@ -195,6 +266,108 @@ module IsbfLearning
         )
       end
       render json: { success: true }
+    end
+
+    def update_resource
+      IsbfLearning.ensure_can_submit!(current_user, guardian)
+      raise Discourse::InvalidAccess unless IsbfLearning.can_manage?(guardian)
+      unless params[:id].to_s.match?(/\A[1-9]\d{0,18}\z/)
+        raise Discourse::InvalidParameters.new("id")
+      end
+      topic = Topic.includes(:first_post).find_by(id: params[:id])
+      unless topic && IsbfLearning.resource(topic, guardian)
+        raise Discourse::NotFound
+      end
+      post = topic.first_post
+      guardian.ensure_can_edit!(post)
+      fields = {}
+      if params.key?(:title)
+        unless params[:title].is_a?(String)
+          raise Discourse::InvalidParameters.new("title")
+        end
+        fields[:title] = params[:title].strip
+      end
+      {
+        course_id: COURSE_FIELD,
+        description: DESCRIPTION_FIELD,
+        link: LINK_FIELD,
+        contributor: CONTRIBUTOR_FIELD,
+        student_number: STUDENT_NUMBER_FIELD,
+        contributor_user_id: CONTRIBUTOR_USER_FIELD
+      }.each do |parameter, field|
+        fields[field.to_sym] = params[parameter] if params.key?(parameter)
+      end
+      fields[DESCRIPTION_FIELD.to_sym] = IsbfLearning.description(
+        params[:description]
+      ) if params.key?(:description)
+      fields[CONTRIBUTOR_FIELD.to_sym] = IsbfLearning.contributor(
+        params[:contributor],
+        post.user
+      ) if params.key?(:contributor)
+      if params.key?(:student_number) || params.key?(:contributor_user_id)
+        number =
+          (
+            if params.key?(:student_number)
+              params[:student_number]
+            else
+              topic.custom_fields[STUDENT_NUMBER_FIELD]
+            end
+          )
+        user_id =
+          (
+            if params.key?(:contributor_user_id)
+              params[:contributor_user_id]
+            else
+              topic.custom_fields[CONTRIBUTOR_USER_FIELD]
+            end
+          )
+        normalized =
+          IsbfLearning.contribution_identity!(
+            current_user,
+            STUDENT_NUMBER_FIELD.to_sym => number,
+            CONTRIBUTOR_USER_FIELD.to_sym => user_id
+          )
+        fields[STUDENT_NUMBER_FIELD.to_sym],
+        fields[CONTRIBUTOR_USER_FIELD.to_sym] =
+          normalized
+      end
+      link = fields.fetch(LINK_FIELD.to_sym, topic.custom_fields[LINK_FIELD])
+      if link.present?
+        title = fields.fetch(:title, topic.title)
+        description =
+          IsbfLearning.description(
+            fields.fetch(
+              DESCRIPTION_FIELD.to_sym,
+              topic.custom_fields[DESCRIPTION_FIELD]
+            )
+          )
+        fields[:raw] = IsbfLearning.link_body(
+          title,
+          IsbfLearning.external_link(link),
+          description
+        )
+        IsbfLearning
+          .file_ids(topic.custom_fields[FILES_FIELD] || [])
+          .each do |id|
+            file = Files.metadata(id)
+            next unless file
+            fields[
+              :raw
+            ] += "\n\n#{IsbfLearning.link_body(file[:name], file[:url])}"
+          end
+      end
+      revised = PostRevisor.new(post, topic).revise!(current_user, fields)
+      if !revised && post.errors.present?
+        return render_json_error(post.errors.full_messages, status: 422)
+      end
+      render json: {
+               success: true,
+               pending: false,
+               edited: true,
+               resource: IsbfLearning.resource(topic.reload, guardian)
+             }
+    rescue Discourse::InvalidParameters => error
+      render_json_error(error.message, status: 422)
     end
 
     def upload

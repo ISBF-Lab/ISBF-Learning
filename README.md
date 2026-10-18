@@ -48,7 +48,7 @@ GitHub Actions 通过 Discourse 官方插件测试工作流执行 Rails RSpec，
 LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 ```
 
-测试规格覆盖课程权限、贡献者校验和作者归属、原生审核及元数据保留、管理员专属资料审核与维护、原生接口绕过、软删除与恢复、查询范围和附件存储/访问约束。这些新增规格需要 CI 执行，不能视为已通过的 Rails 回归。本机未启动完整 Discourse，未执行 Rails 集成测试或浏览器回归；语法检查不能证明实际 UI、移动端、亮暗模式、Admin 隔离或部署后的文件下载行为。合并部署前须由 CI 和 Staging 验证。
+测试规格覆盖课程权限、贡献者校验和作者归属、原生审核及元数据保留、管理员专属资料审核与维护、原生接口绕过、软删除与恢复、查询范围和附件存储/访问约束。2026-10-18 在独立测试容器、数据库和 Redis 中，使用站点 Core `40687391a705728511f6eaeaba8e9be29686694e` 与当前学院权限插件运行本插件全部规格及学院权限注册表规格，267 项通过。GitHub 上游 Core CI 与拟上线版本的网页验收仍分别执行；此记录不表示已经部署到正式环境。
 
 ## 独立资料库
 
@@ -65,3 +65,16 @@ LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 ## 已部署课程资源权限兼容
 
 资料库改造保留实际站点的学院权限集成：课程资源的 `can_manage?` 接受 admin 或原有 `academy_can?(:manage_resources)`，`can_review?` 接受 admin 或原有 `academy_can?(:review_resources)`；课程目录保留学院角色开关关闭时的原生 staff 回退。课程附件的未绑定、待审核及已发布访问规则沿用已部署实现。以上委派权限只作用于课程资源；资料库的直接发布、编辑、删除及投稿审核始终要求原生 admin，目录则沿用原生 staff。
+
+## 课程资源管理与我的贡献
+
+课程资源页面的直接分享、编辑、删除、课程目录编辑及学号关联统一复用既有“校园功能 → 管理学习资源”权限，原生 admin 保留完整权限。审核仍由“审核学习资源”独立控制。普通用户分享入口展示指定 WPS 表单，不再显示直接上传表单；已有原生审核记录及兼容投稿接口保留。
+
+- `GET /isbf/learning/contributions`：按当前会话账号分页读取已发布贡献，参数仅使用零起点 `page`，返回 `resources` 与 `has_more`。显式关联优先于原上传账号，历史无关联资料按首帖真实上传者归属；待审核、已拒绝、隐藏、删除及无课程或分类访问权限的资料不会展示。重新关联和软删除后，下一次查询立即反映变化。
+- `GET /isbf/learning/contributor-users?student_number=...`：仅资源管理者可按学号精确查询已安装学院插件 `StudentRegistration` 中已关联的真实用户。接口不列举全体学号，不返回邀请码或邮箱。无学院插件时返回空列表。
+- 创建资料可选传入 `student_number` 与 `contributor_user_id`。显式关联必须通过服务端验证，要求所选用户与已注册学号一致；贡献者纯文本名称独立保存，绝不修改真实 Topic/Post 作者。学号及关联 ID 只序列化给资源管理者。
+- `PUT /isbf/learning/resources/:id`：获管理权限且通过原生 Guardian 编辑权限者可修改标题、简介、链接、贡献者、学号/关联用户及所属课程；使用原生 `PostRevisor`，保留修订记录、资源 ID 和作者。被删除资源不能通过该接口编辑。
+- `PUT /isbf/learning/courses/:id`：修改课程名称和所属上级分类，保留 UUID 及全部资料关联；同分类重名被拒绝，归档目录元数据保留。`Courses.update(user, id, name:, grade:)` 与同伴的科目管理接口保持一致。
+- `PUT /isbf/learning/grades/:id`：修改现有上级分类的显示名，保留 1–4 的稳定分类 ID。`GET /courses` 和 site capability 的 `grades` 返回新名称。
+
+后续合并同伴科目编辑/删除工作时，保留其 `with_catalog_lock`、目录归档和软删除/审核事务，复用本次同名更新接口；将旧 `ensure_admin!` 统一衔接 `IsbfLearning.can_manage?`，避免重新拒绝用户已授权的学院管理员。此变更不新增课程删除，不对正式资料执行删除，也不修改学院权限插件和已有开关值。
