@@ -2,6 +2,10 @@ plugins:
   isbf_learning_enabled:
     default: true
     client: true
+  isbf_learning_collection_form_url:
+    default: "https://f.wps.cn/g/wG6gL3Rz/"
+    client: true
+    validator: "IsbfLearningCollectionFormUrlValidator"
   isbf_learning_category_id:
     default: 0
     type: integer

@@ -22,6 +22,22 @@ module IsbfLearning
       render json: { courses: Courses.list, grades: Courses.grades }
     end
 
+    def update_collection_form
+      raise Discourse::InvalidAccess unless IsbfLearning.can_manage?(guardian)
+      url = params[:url].is_a?(String) ? params[:url].strip : ""
+      SiteSetting.set_and_log(
+        :isbf_learning_collection_form_url,
+        url,
+        current_user
+      )
+      render json: {
+               success: true,
+               url: SiteSetting.isbf_learning_collection_form_url
+             }
+    rescue Discourse::InvalidParameters => error
+      render_json_error(error.message, status: 422)
+    end
+
     def update_course
       course =
         Courses.update(

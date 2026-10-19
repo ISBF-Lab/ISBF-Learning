@@ -7,6 +7,8 @@
 # url: https://github.com/ISBF-Lab/ISBF-Learning
 # required_version: 3.2.0
 
+require_relative "lib/isbf_learning_collection_form_url_validator"
+
 enabled_site_setting :isbf_learning_enabled
 
 after_initialize do
@@ -451,6 +453,7 @@ after_initialize do
   end
 
   IsbfLearning::Engine.routes.draw do
+    put "/collection-form" => "library#update_collection_form"
     get "/" => "library#page"
     get "/courses" => "library#courses"
     post "/courses" => "library#create_course"

@@ -1,11 +1,13 @@
 en:
   site_settings:
+    isbf_learning_collection_form_url: "Learning-resource collection form link. Users open this form to submit resources for review. Any complete HTTP or HTTPS URL is accepted."
     isbf_learning_enabled: "Enable the ISBF course-resource and library plugin."
     isbf_learning_category_id: "Authenticated course-resource category ID."
     isbf_learning_storage_limit_mb: "Maximum private learning file storage in MiB."
     isbf_library_enabled: "Enable the independent resource library (requires the ISBF Learning plugin)."
     isbf_library_category_id: "Resource library category ID, different from the course-resource category."
   isbf_learning:
+    invalid_collection_form_url: "Enter a complete HTTP or HTTPS link."
     directory_changed: "The course or category has changed. Please confirm deletion again."
     directory_delete_failed: "Deletion failed. The directory and its resources have been kept. Please retry."
     invalid_contributor_user: "Select the registered user matching this student number."
