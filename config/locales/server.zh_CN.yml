@@ -1,11 +1,13 @@
 zh_CN:
   site_settings:
+    isbf_learning_collection_form_url: "学习资料收集表单链接。用户通过此表单提交资料，审核后入库。支持完整的 HTTP 或 HTTPS 链接。"
     isbf_learning_enabled: "开启课程资源与资料库插件总开关。"
     isbf_learning_category_id: "课程资源实际分类 ID。"
     isbf_learning_storage_limit_mb: "学习资源私有文件总容量上限（MiB）。"
     isbf_library_enabled: "启用独立资料库（需开启 ISBF Learning 插件总开关）。"
     isbf_library_category_id: "资料库实际分类 ID，必须与课程资源分类不同。"
   isbf_learning:
+    invalid_collection_form_url: "请输入完整的 HTTP 或 HTTPS 链接。"
     directory_changed: "课程或分类内容已变化，请重新确认删除。"
     directory_delete_failed: "删除失败，课程、分类及资料均未删除，请重试。"
     invalid_contributor_user: "请选择与该学号对应的已注册用户。"
