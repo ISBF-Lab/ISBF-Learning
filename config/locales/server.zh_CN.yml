@@ -4,6 +4,7 @@ zh_CN:
     isbf_learning_enabled: "开启课程资源与资料库插件总开关。"
     isbf_learning_category_id: "课程资源实际分类 ID。"
     isbf_learning_storage_limit_mb: "学习资源私有文件总容量上限（MiB）。"
+    isbf_library_collection_form_url: "资料库的收集表单地址，与课程资源的表单设置独立。"
     isbf_library_enabled: "启用独立资料库（需开启 ISBF Learning 插件总开关）。"
     isbf_library_category_id: "资料库实际分类 ID，必须与课程资源分类不同。"
   isbf_learning:

@@ -17,6 +17,10 @@ plugins:
   isbf_library_enabled:
     default: false
     client: true
+  isbf_library_collection_form_url:
+    default: "https://f.wps.cn/g/wG6gL3Rz/"
+    client: true
+    validator: "IsbfLearningCollectionFormUrlValidator"
   isbf_library_category_id:
     default: 0
     type: integer

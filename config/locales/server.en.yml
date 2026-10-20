@@ -4,6 +4,7 @@ en:
     isbf_learning_enabled: "Enable the ISBF course-resource and library plugin."
     isbf_learning_category_id: "Authenticated course-resource category ID."
     isbf_learning_storage_limit_mb: "Maximum private learning file storage in MiB."
+    isbf_library_collection_form_url: "Resource library submission form URL. This setting is independent of the course resource form."
     isbf_library_enabled: "Enable the independent resource library (requires the ISBF Learning plugin)."
     isbf_library_category_id: "Resource library category ID, different from the course-resource category."
   isbf_learning:
