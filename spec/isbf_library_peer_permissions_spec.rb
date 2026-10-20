@@ -126,6 +126,7 @@ RSpec.describe "ISBF library parity with academy resource permissions", type: :r
         params: {
           post: {
             raw: "Updated https://example.org/library.pdf",
+            isbf_library_link: "https://example.org/library.pdf",
           },
         }
     expect(response.status).to eq(200), response.body

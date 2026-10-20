@@ -51,7 +51,7 @@ module IsbfLibrary
     end
 
     def self.synchronize(&block)
-      PluginStoreRow.transaction { with_catalog_lock(&block) }
+      with_catalog_lock(&block)
     end
 
     def self.list(include_deleted: false)

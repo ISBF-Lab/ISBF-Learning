@@ -13,46 +13,48 @@ module IsbfLibrary
 
     def self.delete(user, kind:, id:, confirmation_token:, confirmation_count:, cascade:)
       authorize!(user)
-      Catalog.synchronize do
-        selected = selection(kind, id)
-        plan = build_plan(user, selected)
-        expected = verifier.verified(confirmation_token.to_s)
-        valid_confirmation =
-          expected == verification_payload(user, selected) &&
-            confirmation_count.to_s == plan[:required_confirmations].to_s &&
-            (!plan[:has_children] || cascade == true || cascade == "true")
-        raise Changed unless valid_confirmation
+      PluginStoreRow.transaction do
+        Catalog.synchronize do
+          selected = selection(kind, id)
+          plan = build_plan(user, selected)
+          expected = verifier.verified(confirmation_token.to_s)
+          valid_confirmation =
+            expected == verification_payload(user, selected) &&
+              confirmation_count.to_s == plan[:required_confirmations].to_s &&
+              (!plan[:has_children] || cascade == true || cascade == "true")
+          raise Changed unless valid_confirmation
 
-        topics = resources(selected[:courses]).order(:id).lock.includes(:first_post).to_a
-        topics.each do |topic|
-          user.guardian.ensure_can_delete!(topic)
-          raise IsbfLearning::StorageError unless topic.first_post
-        end
-        topics.each do |topic|
-          PostDestroyer.new(user, topic.first_post).destroy
-          raise IsbfLearning::StorageError unless Topic.with_deleted.find(topic.id).deleted_at
-        end
+          topics = resources(selected[:courses]).order(:id).lock.includes(:first_post).to_a
+          topics.each do |topic|
+            user.guardian.ensure_can_delete!(topic)
+            raise IsbfLearning::StorageError unless topic.first_post
+          end
+          topics.each do |topic|
+            PostDestroyer.new(user, topic.first_post).destroy
+            raise IsbfLearning::StorageError unless Topic.with_deleted.find(topic.id).deleted_at
+          end
 
-        now = Time.now.utc.iso8601
-        ids = selected[:courses].map { |course| course["id"] }
-        catalog = Catalog.list(include_deleted: true)
-        catalog.each do |course|
-          next if ids.exclude?(course["id"])
-          course["deleted_at"] = now
-          course["deleted_by_id"] = user.id
-          course["deleted_topic_ids"] = topics
-            .select { |topic| topic.custom_fields[GROUP_FIELD] == course["id"] }
-            .map(&:id)
+          now = Time.now.utc.iso8601
+          ids = selected[:courses].map { |course| course["id"] }
+          catalog = Catalog.list(include_deleted: true)
+          catalog.each do |course|
+            next if ids.exclude?(course["id"])
+            course["deleted_at"] = now
+            course["deleted_by_id"] = user.id
+            course["deleted_topic_ids"] = topics
+              .select { |topic| topic.custom_fields[GROUP_FIELD] == course["id"] }
+              .map(&:id)
+          end
+          raise IsbfLearning::StorageError unless PluginStore.set(STORE, "groups", catalog)
+          if selected[:kind] == "grade"
+            parents = Catalog.categories(include_deleted: true)
+            parent = parents.find { |entry| entry["id"] == selected[:id] }
+            parent["deleted_at"] = now
+            parent["deleted_by_id"] = user.id
+            raise IsbfLearning::StorageError unless PluginStore.set(STORE, "categories", parents)
+          end
+          { success: true, deleted_courses: ids, deleted_resources: topics.length }
         end
-        raise IsbfLearning::StorageError unless PluginStore.set(STORE, "groups", catalog)
-        if selected[:kind] == "grade"
-          parents = Catalog.categories(include_deleted: true)
-          parent = parents.find { |entry| entry["id"] == selected[:id] }
-          parent["deleted_at"] = now
-          parent["deleted_by_id"] = user.id
-          raise IsbfLearning::StorageError unless PluginStore.set(STORE, "categories", parents)
-        end
-        { success: true, deleted_courses: ids, deleted_resources: topics.length }
       end
     end
 
