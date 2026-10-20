@@ -2,12 +2,14 @@
 
 require "rails_helper"
 
-RSpec.describe "ISBF library isolation from academy resource permissions", type: :request do
+RSpec.describe "ISBF library parity with academy resource permissions", type: :request do
   fab!(:category)
   fab!(:learning_category, :category)
   fab!(:admin)
   fab!(:delegate) { Fabricate(:moderator, active: true, approved: true, refresh_auto_groups: true) }
-  fab!(:member) { Fabricate(:user, active: true, approved: true, trust_level: 1, refresh_auto_groups: true) }
+  fab!(:member) do
+    Fabricate(:user, active: true, approved: true, trust_level: 1, refresh_auto_groups: true)
+  end
 
   before do
     SiteSetting.isbf_learning_enabled = true
@@ -18,11 +20,12 @@ RSpec.describe "ISBF library isolation from academy resource permissions", type:
       item.set_permissions(trust_level_0: :full, staff: :full)
       item.save!
     end
-    academy_permissions = Module.new do
-      def academy_can?(permission)
-        %i[manage_resources review_resources].include?(permission)
+    academy_permissions =
+      Module.new do
+        def academy_can?(permission)
+          %i[manage_resources review_resources].include?(permission)
+        end
       end
-    end
     allow(Guardian).to receive(:new).and_wrap_original do |original, *args, **kwargs|
       guardian = original.call(*args, **kwargs)
       guardian.extend(academy_permissions) if guardian.user&.id == delegate.id
@@ -32,16 +35,26 @@ RSpec.describe "ISBF library isolation from academy resource permissions", type:
 
   let(:course) { IsbfLearning::Courses.create(admin, name: "高等数学", grade: 1) }
   let(:directory) { IsbfLibrary::Catalog.create(admin, kind: "category", name: "校园资料") }
-  let(:group) { IsbfLibrary::Catalog.create(admin, kind: "group", name: "新生指南", category_id: directory.fetch("id")) }
+  let(:group) do
+    IsbfLibrary::Catalog.create(
+      admin,
+      kind: "group",
+      name: "新生指南",
+      category_id: directory.fetch("id"),
+    )
+  end
 
   def resource_payload(library)
     @number = (@number || 0) + 1
     {
-      title: "Academy permission reference #{@number}", raw: "Reference https://example.org/academy.pdf",
-      category: library.category_id,
+      :title => "Academy permission reference #{@number}",
+      :raw => "Reference https://example.org/academy.pdf",
+      :category => library.category_id,
       library::GROUP_FIELD.to_sym => (library == IsbfLearning ? course : group).fetch("id"),
-      library::FILES_FIELD.to_sym => "[]", library::LINK_FIELD.to_sym => "https://example.org/academy.pdf",
-      library::DESCRIPTION_FIELD.to_sym => "Original description", library::CONTRIBUTOR_FIELD.to_sym => "资料小组",
+      library::FILES_FIELD.to_sym => "[]",
+      library::LINK_FIELD.to_sym => "https://example.org/academy.pdf",
+      library::DESCRIPTION_FIELD.to_sym => "Original description",
+      library::CONTRIBUTOR_FIELD.to_sym => "资料小组",
     }
   end
 
@@ -51,12 +64,12 @@ RSpec.describe "ISBF library isolation from academy resource permissions", type:
     result
   end
 
-  it "delegates course helpers while keeping independent library helpers admin-only" do
+  it "uses the same management and review grants in both independent libraries" do
     guardian = Guardian.new(delegate)
     expect(IsbfLearning.can_manage?(guardian)).to eq(true)
     expect(IsbfLearning.can_review?(guardian)).to eq(true)
-    expect(IsbfLibrary.can_manage?(guardian)).to eq(false)
-    expect(IsbfLibrary.can_review?(guardian)).to eq(false)
+    expect(IsbfLibrary.can_manage?(guardian)).to eq(true)
+    expect(IsbfLibrary.can_review?(guardian)).to eq(true)
     admin_guardian = Guardian.new(admin)
     [IsbfLearning, IsbfLibrary].each do |library|
       expect(library.can_manage?(admin_guardian)).to eq(true)
@@ -69,68 +82,86 @@ RSpec.describe "ISBF library isolation from academy resource permissions", type:
     plain_guardian.define_singleton_method(:is_admin?) { false }
     expect(IsbfLearning.can_manage?(plain_guardian)).to eq(false)
     expect(IsbfLearning.can_review?(plain_guardian)).to eq(false)
-    plain_guardian.define_singleton_method(:academy_can?) { |permission| permission == :manage_resources }
+    plain_guardian.define_singleton_method(:academy_can?) do |permission|
+      permission == :manage_resources
+    end
     expect(IsbfLearning.can_manage?(plain_guardian)).to eq(true)
     expect(IsbfLearning.can_review?(plain_guardian)).to eq(false)
-    expect(IsbfLibrary.can_manage?(plain_guardian)).to eq(false)
+    expect(IsbfLibrary.can_manage?(plain_guardian)).to eq(true)
     expect(IsbfLibrary.can_review?(plain_guardian)).to eq(false)
   end
 
-  it "preserves delegated course creation, metadata edits and deletion while denying library management" do
+  it "preserves delegated creation, metadata edits and deletion in both libraries" do
     learning = post_result(delegate, IsbfLearning)
     expect(learning.post).to be_present
     expect(learning.reviewable).to be_nil
     queued_library = post_result(delegate, IsbfLibrary)
-    expect(queued_library.action).to eq(:enqueued)
-    expect(queued_library.post).to be_nil
+    expect(queued_library.post).to be_present
+    expect(queued_library.reviewable).to be_nil
     library_post = post_result(admin, IsbfLibrary).post
     guardian = Guardian.new(delegate)
     expect(guardian.can_edit_post?(learning.post)).to eq(true)
     expect(guardian.can_delete_topic?(learning.post.topic)).to eq(true)
-    expect(guardian.can_edit_post?(library_post)).to eq(false)
-    expect(guardian.can_delete_topic?(library_post.topic)).to eq(false)
+    expect(guardian.can_edit_post?(library_post)).to eq(true)
+    expect(guardian.can_delete_topic?(library_post.topic)).to eq(true)
     sign_in(delegate)
-    put "/posts/#{learning.post.id}.json", params: {
-      title: "Delegated revised course reference",
-      post: {
-        raw: "Updated course reference https://example.org/revised-academy.pdf",
-        isbf_learning_link: "https://example.org/revised-academy.pdf",
-        isbf_learning_description: "Updated course description", isbf_learning_contributor: "课程小组",
-      },
-    }
+    put "/posts/#{learning.post.id}.json",
+        params: {
+          title: "Delegated revised course reference",
+          post: {
+            raw: "Updated course reference https://example.org/revised-academy.pdf",
+            isbf_learning_link: "https://example.org/revised-academy.pdf",
+            isbf_learning_description: "Updated course description",
+            isbf_learning_contributor: "课程小组",
+          },
+        }
     expect(response.status).to eq(200), response.body
     expect(learning.post.topic.reload.custom_fields).to include(
       IsbfLearning::COURSE_FIELD => course.fetch("id"),
       IsbfLearning::LINK_FIELD => "https://example.org/revised-academy.pdf",
-      IsbfLearning::DESCRIPTION_FIELD => "Updated course description", IsbfLearning::CONTRIBUTOR_FIELD => "课程小组",
+      IsbfLearning::DESCRIPTION_FIELD => "Updated course description",
+      IsbfLearning::CONTRIBUTOR_FIELD => "课程小组",
     )
-    put "/posts/#{library_post.id}.json", params: { post: { raw: "Updated https://example.org/library.pdf" } }
-    expect(response.status).to eq(403), response.body
+    put "/posts/#{library_post.id}.json",
+        params: {
+          post: {
+            raw: "Updated https://example.org/library.pdf",
+            isbf_library_link: "https://example.org/library.pdf",
+          },
+        }
+    expect(response.status).to eq(200), response.body
     delete "/isbf/library/resources/#{library_post.topic_id}.json"
-    expect(response.status).to eq(403), response.body
-    expect(library_post.topic.reload.deleted_at).to be_nil
+    expect(response.status).to eq(200), response.body
+    expect(Topic.with_deleted.find(library_post.topic_id).deleted_at).to be_present
     delete "/isbf/learning/resources/#{learning.post.topic_id}.json"
     expect(response.status).to eq(200), response.body
     expect(Topic.with_deleted.find(learning.post.topic_id).deleted_at).to be_present
   end
 
-  it "preserves delegated native course review while denying independent library review" do
+  it "preserves delegated native review in both independent libraries" do
     learning = post_result(member, IsbfLearning).reviewable
     library = post_result(member, IsbfLibrary).reviewable
     expect(learning).to be_pending
     expect(library).to be_pending
     # Simulate the separate academy plugin's native review visibility grant.
-    [learning, library].each { |reviewable| reviewable.update_columns(reviewable_by_moderator: true) }
+    [learning, library].each do |reviewable|
+      reviewable.update_columns(reviewable_by_moderator: true)
+    end
     guardian = Guardian.new(delegate)
-    expect(Reviewable.viewable_by(delegate, preload: false).where(id: [learning.id, library.id]).pluck(:id)).to eq([learning.id])
+    expect(
+      Reviewable
+        .viewable_by(delegate, preload: false)
+        .where(id: [learning.id, library.id])
+        .pluck(:id),
+    ).to contain_exactly(learning.id, library.id)
     expect(learning.actions_for(guardian).has?(:approve_post)).to eq(true)
-    expect(library.actions_for(guardian).has?(:approve_post)).to eq(false)
-    expect { library.perform(delegate, :approve_post) }.to raise_error(Reviewable::InvalidAction)
-    expect(library.reload).to be_pending
+    expect(library.actions_for(guardian).has?(:approve_post)).to eq(true)
     approval = learning.perform(delegate, :approve_post)
     expect(approval.success?).to eq(true)
     expect(approval.created_post.user_id).to eq(member.id)
-    expect(approval.created_post.topic.reload.custom_fields.fetch(IsbfLearning::COURSE_FIELD)).to eq(course.fetch("id"))
-    expect(library.reload).to be_pending
+    expect(
+      approval.created_post.topic.reload.custom_fields.fetch(IsbfLearning::COURSE_FIELD),
+    ).to eq(course.fetch("id"))
+    expect(library.perform(delegate, :approve_post).success?).to eq(true)
   end
 end

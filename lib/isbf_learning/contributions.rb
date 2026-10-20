@@ -4,47 +4,51 @@ module IsbfLearning
   module Contributions
     PAGE_SIZE = 20
 
-    def self.list(user, guardian, page:)
+    def self.list(user, guardian, page:, library: IsbfLearning)
       scope =
         Topic
           .visible
           .secured(guardian)
-          .where(
-            category_id: IsbfLearning.category_id,
-            archetype: Archetype.default
-          )
+          .where(category_id: library.category_id, archetype: Archetype.default)
           .joins(:first_post)
           .where(
             posts: {
               hidden: false,
               user_deleted: false,
               deleted_at: nil,
-              post_type: Post.types[:regular]
-            }
+              post_type: Post.types[:regular],
+            },
           )
       assigned =
-        TopicCustomField.where(
-          name: CONTRIBUTOR_USER_FIELD,
-          value: user.id.to_s
-        ).select(:topic_id)
+        TopicCustomField.where(name: library::CONTRIBUTOR_USER_FIELD, value: user.id.to_s).select(
+          :topic_id,
+        )
       attributed =
         TopicCustomField
-          .where(name: CONTRIBUTOR_USER_FIELD)
+          .where(name: library::CONTRIBUTOR_USER_FIELD)
           .where.not(value: [nil, ""])
           .select(:topic_id)
       scope =
         scope.where(id: assigned).or(
-          scope.where(posts: { user_id: user.id }).where.not(id: attributed)
+          scope.where(posts: { user_id: user.id }).where.not(id: attributed),
         )
-      courses = Courses.list.index_by { |course| course["id"] }
+      courses =
+        (
+          if library == IsbfLearning
+            Courses.list
+          else
+            IsbfLibrary::Catalog.groups.select do |group|
+              IsbfLibrary::Catalog.find_category(group["category_id"])
+            end
+          end
+        ).index_by { |course| course["id"] }
       valid_courses = courses.keys
       scope =
         scope.where(
           id:
-            TopicCustomField.where(
-              name: COURSE_FIELD,
-              value: valid_courses
-            ).select(:topic_id)
+            TopicCustomField.where(name: library::GROUP_FIELD, value: valid_courses).select(
+              :topic_id,
+            ),
         )
       topics =
         scope
@@ -57,10 +61,8 @@ module IsbfLearning
         resources:
           topics
             .first(PAGE_SIZE)
-            .filter_map do |topic|
-              IsbfLearning.resource(topic, guardian, courses: courses)
-            end,
-        has_more: topics.length > PAGE_SIZE
+            .filter_map { |topic| library.resource(topic, guardian, courses: courses) },
+        has_more: topics.length > PAGE_SIZE,
       }
     end
   end

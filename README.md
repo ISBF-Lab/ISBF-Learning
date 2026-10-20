@@ -58,13 +58,13 @@ LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 
 `GET /isbf/library/resources` 使用 `group_id` 或 `q` 和零起点 `page`；没有筛选时返回空列表。有 `q` 时原生 Search 搜索资料库全部有效分组，与课程资源隔离。`POST` 接受 `group_id`、`title`、`link`、可选 `description` 和 `contributor`。仅分享外部链接，不新增上传接口。返回同样的 `success`、`pending`、`resource`；资料带 `category` 和 `group` 目录信息。资源使用独立 `isbf_library_*` Topic 字段，管理员编辑沿用 `/posts/:id.json` 的顶层 `title` 与首帖字段，删除沿用 `DELETE /isbf/library/resources/:id`。
 
-所有非 admin（包括版主）投稿进入管理员专属原生审核。原生发帖与修订统一按实际分类校验所属库，拒绝跨库字段/目录 ID、匿名和公共附件；已有课程资料及其私有附件机制不变。禁用资料库不会移除已有资料的管理员维护限制，两个已配置资源分类继续从社区列表排除，全站搜索保留 Guardian 权限。
+没有资源管理授权的投稿进入原生审核，审核使用与课程资源相同的独立审核权限。原生发帖与修订统一按实际分类校验所属库，拒绝跨库字段/目录 ID、匿名和公共附件；已有课程资料及其私有附件机制不变。禁用资料库不会移除已有资料的维护限制，两个已配置资源分类继续从社区列表排除，全站搜索保留 Guardian 权限。
 
 回滚时可关闭资料库入口/新增发布并恢复旧主题，但保留当前插件的权限钩子和全部审核类型。存在新目录申请记录时，不得回退到未注册 `ReviewableIsbfLibraryDirectory` 的旧插件版本；不删除历史目录、资料或申请。发布前备份数据库、主题、插件、分类配置和既有私有附件目录。
 
 ## 已部署课程资源权限兼容
 
-资料库改造保留实际站点的学院权限集成：课程资源的 `can_manage?` 接受 admin 或原有 `academy_can?(:manage_resources)`，`can_review?` 接受 admin 或原有 `academy_can?(:review_resources)`；课程目录保留学院角色开关关闭时的原生 staff 回退。课程附件的未绑定、待审核及已发布访问规则沿用已部署实现。以上委派权限只作用于课程资源；资料库的直接发布、编辑、删除及投稿审核始终要求原生 admin，目录则沿用原生 staff。
+课程资源和资料库共用学院权限集成：`can_manage?` 接受 admin 或原有 `academy_can?(:manage_resources)`，`can_review?` 接受 admin 或原有 `academy_can?(:review_resources)`；目录保留学院角色开关关闭时的原生 staff 回退。课程附件的未绑定、待审核及已发布访问规则沿用已部署实现。两个资源库继续使用各自的分类、目录、贡献归属字段和查询范围。
 
 ## 课程资源管理与我的贡献
 
