@@ -202,7 +202,7 @@ module IsbfLearning
 
   def self.contributor(value, user)
     default = contributor_name(user)
-    return default if value.nil? || (value.is_a?(String) && value.strip.empty?)
+    return "" if value.nil? || (value.is_a?(String) && value.strip.empty?)
     valid =
       value.is_a?(String) && !value.match?(/[\x00-\x1f\x7f]/) &&
         (value.strip.length <= CONTRIBUTOR_LIMIT || value.strip == default)
@@ -358,9 +358,7 @@ module IsbfLearning
       created_at: post.created_at,
       grade: course["grade"],
       course: course,
-      contributor:
-        topic.custom_fields[CONTRIBUTOR_FIELD].presence ||
-          contributor_name(post.user),
+      contributor: topic.custom_fields[CONTRIBUTOR_FIELD].to_s.strip,
       can_delete: can_manage?(guardian) && guardian.can_delete_topic?(topic),
       can_edit: can_manage?(guardian) && guardian.can_edit_post?(post),
       author:

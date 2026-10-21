@@ -160,7 +160,7 @@ RSpec.describe IsbfLearning::LibraryController, type: :request do
       expect(response.status).to eq(200), response.body
       expect(response.parsed_body.fetch("resource")).to include(
         "description" => "",
-        "contributor" => IsbfLearning.contributor_name(admin)
+        "contributor" => ""
       )
     end
 

@@ -22,7 +22,7 @@ Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，�
 
 `GET /isbf/learning/resources` 接受 `course_id`、`page` 和 `q`，返回 `resources` 与 `has_more`；每项包含 `contributor`（纯文本贡献者名称）和 `can_delete`（当前用户是管理员且 Guardian 允许删除该主题时为 true）。普通列表按课程查询；有 `q` 时使用 Core Search 搜索资源库全部年级与课程，忽略当前课程筛选。两种查询均仅覆盖配置资源分类内当前用户可以访问的已发布资源。
 
-分享窗口包含标题、选填简要介绍、链接和选填贡献者名称，使用 `POST /isbf/learning/resources`，参数为 `course_id`、`title`、`description`（可选）、`link`、`contributor`（可选）。贡献者输入去除首尾空白后最多 15 个 Unicode 码点，必须是单行字符串，拒绝换行、控制字符与对象/数组；按纯文本序列化。未提供、nil 或空白时采用原提交账号的 `name.presence || username`；此账号名称回退不受输入框 15 字限制。历史资料缺少该字段时同样回退到原提交账号。简介最多 300 个 Unicode 字符，支持换行；服务端拒绝超长、非字符串和非法控制字符，保存后按纯文本显示在资料标题下方，并参与限定学习库范围的原生搜索。空简介与历史资料保持原样。课程沿用页面当前选项。接口固定学习分类，不接受正文、标签、附件或其他话题参数；外链必须是完整 HTTP(S) 地址，最多 2048 字符，不接受本站链接、内嵌凭据或空白字符。返回 `success`、`pending` 和已发布的 `resource`；所有非管理员（包括版主）先进入原生 Reviewable，审核通过前不会出现资料卡片。
+分享窗口包含标题、选填简要介绍、链接和选填贡献者名称，使用 `POST /isbf/learning/resources`，参数为 `course_id`、`title`、`description`（可选）、`link`、`contributor`（可选）。贡献者输入去除首尾空白后最多 15 个 Unicode 码点，必须是单行字符串，拒绝换行、控制字符与对象/数组；按纯文本序列化。未提供、nil 或空白时保留为空；历史资料缺少该字段时返回空字符串，卡片隐藏贡献者标签。真实 Topic/Post 作者与贡献记录仍保留。简介最多 300 个 Unicode 字符，支持换行；服务端拒绝超长、非字符串和非法控制字符，保存后按纯文本显示在资料标题下方，并参与限定学习库范围的原生搜索。空简介与历史资料保持原样。课程沿用页面当前选项。接口固定学习分类，不接受正文、标签、附件或其他话题参数；外链必须是完整 HTTP(S) 地址，最多 2048 字符，不接受本站链接、内嵌凭据或空白字符。返回 `success`、`pending` 和已发布的 `resource`；所有非管理员（包括版主）先进入原生 Reviewable，审核通过前不会出现资料卡片。
 
 服务端仍使用原生 NewPostManager、Topic/Post 和审核流程。新资料保存 `isbf_learning_link`、`isbf_learning_description` 和 `isbf_learning_contributor`，审核 payload 保留这些字段，卡片标题直接打开链接，不重复显示内部正文。原生主题标题校验继续生效。历史附件资料与原生管理员编辑功能保留，原有 `POST /posts` 的资源字段仍受分类、身份、附件权限和审核限制。
 
