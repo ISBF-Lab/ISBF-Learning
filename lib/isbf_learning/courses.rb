@@ -21,11 +21,40 @@ module IsbfLearning
     def self.grades
       labels = PluginStore.get(STORE, "grade_labels") || {}
       deleted = PluginStore.get(STORE, "deleted_grades") || {}
-      GRADES
+      custom =
+        (PluginStore.get(STORE, "custom_grades") || []).map do |entry|
+          { id: entry["id"], label: entry["label"] }
+        end
+      (GRADES + custom)
         .reject { |grade| deleted.key?(grade[:id].to_s) }
         .map do |grade|
           grade.merge(label: labels[grade[:id].to_s].presence || grade[:label])
         end
+    end
+
+    def self.create_grade(user, name:)
+      raise Discourse::InvalidAccess unless user&.guardian&.is_admin?
+      IsbfLearning.ensure_can_submit!(user, user.guardian)
+      synchronize do
+        label = normalize_name(name)
+        if grades.any? { |grade| grade[:label].casecmp?(label) }
+          raise Discourse::InvalidParameters.new("name")
+        end
+        custom = PluginStore.get(STORE, "custom_grades") || []
+        if custom.length >= 1000
+          raise Discourse::InvalidParameters.new("grades")
+        end
+        id =
+          (
+            GRADES.map { |grade| grade[:id] } +
+              custom.map { |grade| grade["id"] }
+          ).max + 1
+        grade = { "id" => id, "label" => label }
+        unless PluginStore.set(STORE, "custom_grades", custom + [grade])
+          raise StorageError
+        end
+        grade
+      end
     end
 
     def self.update(user, id, name:, grade:)
@@ -75,18 +104,21 @@ module IsbfLearning
     end
 
     def self.normalize(name:, grade:)
+      name = normalize_name(name)
+      unless grade.to_s.match?(/\A[1-9]\d{0,9}\z/) &&
+               grades.any? { |entry| entry[:id] == grade.to_i }
+        raise Discourse::InvalidParameters.new("grade")
+      end
+      { "name" => name, "grade" => grade.to_i }
+    end
+
+    def self.normalize_name(name)
       raise Discourse::InvalidParameters.new("name") unless name.is_a?(String)
       name = name.strip.unicode_normalize(:nfkc)
       unless name.length.between?(1, 80) && !name.match?(/[\p{Cc}]/)
         raise Discourse::InvalidParameters.new("name")
       end
-      unless grade.to_s.match?(/\A[1-4]\z/)
-        raise Discourse::InvalidParameters.new("grade")
-      end
-      unless grades.any? { |entry| entry[:id] == grade.to_i }
-        raise Discourse::InvalidParameters.new("grade")
-      end
-      { "name" => name, "grade" => grade.to_i }
+      name
     end
 
     # Hold the catalog mutex through the outer review transaction's commit.
@@ -221,6 +253,6 @@ module IsbfLearning
       course.with_indifferent_access
     end
 
-    private_class_method :add, :matching, :ensure_staff!
+    private_class_method :add, :matching, :ensure_staff!, :normalize_name
   end
 end

@@ -14,6 +14,8 @@ Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，�
 
 ## 接口
 
+2026-10-21：管理员可通过 `POST /isbf/learning/grades`（`name`）新增课程分类，返回 HTTP 201 和 `{success: true, pending: false, grade: {id, label}}`。现有四个分类及课程关联保留，新增分类使用独立递增编号；分类重命名与归档继续沿用现有接口，不复用已归档编号。课程的 `grade` 参数可选择任意有效分类。前台添加入口仅向管理员显示，分类新增接口也在服务端要求管理员；原有课程申请、审核与资料权限不变。
+
 登录后可使用 `GET /isbf/learning/courses` 获取 `{courses: [...]}`。`POST /isbf/learning/courses` 接受 `name` 与 `grade`（1 至 4）：staff 返回 `{success: true, pending: false, course: {...}}`；普通成员返回 `{success: true, pending: true, reviewable_id: ...}`，审批前不写入目录。同一申请人重复提交相同待审核申请复用原记录；拒绝后可重新申请。目录内已有同年级同名课程或非法值返回 422。
 
 课程申请使用原生 `ReviewableIsbfLearningCourse` 和审核权限，ISBF-UI 通过官方 `registerReviewableComponent` 展示课程及年级。批准和目录写入受同一分布式互斥锁保护，锁覆盖原生审核事务的提交；不同用户申请同一课程时，批准复用已存在课程。写入失败不会批准申请，审核事务失败同时回滚目录。禁言、封禁、未获准及无分类权限的账号不能申请。
