@@ -24,7 +24,7 @@ module IsbfLibrary
     DESCRIPTION_FIELD,
     CONTRIBUTOR_FIELD,
     STUDENT_NUMBER_FIELD,
-    CONTRIBUTOR_USER_FIELD
+    CONTRIBUTOR_USER_FIELD,
   ].freeze
 
   def self.external_link(value)
@@ -51,25 +51,21 @@ module IsbfLibrary
     IsbfLearning.contribution_identity!(
       actor,
       {
-        IsbfLearning::STUDENT_NUMBER_FIELD.to_sym =>
-          options[STUDENT_NUMBER_FIELD.to_sym],
-        IsbfLearning::CONTRIBUTOR_USER_FIELD.to_sym =>
-          options[CONTRIBUTOR_USER_FIELD.to_sym]
-      }
+        IsbfLearning::STUDENT_NUMBER_FIELD.to_sym => options[STUDENT_NUMBER_FIELD.to_sym],
+        IsbfLearning::CONTRIBUTOR_USER_FIELD.to_sym => options[CONTRIBUTOR_USER_FIELD.to_sym],
+      },
     )
   end
 
   def self.category_id
     id = SiteSetting.isbf_library_category_id.to_i
-    if id.positive? && id != SiteSetting.isbf_learning_category_id.to_i &&
-         Category.exists?(id: id)
+    if id.positive? && id != SiteSetting.isbf_learning_category_id.to_i && Category.exists?(id: id)
       id
     end
   end
 
   def self.enabled?
-    SiteSetting.isbf_learning_enabled && SiteSetting.isbf_library_enabled &&
-      category_id.present?
+    SiteSetting.isbf_learning_enabled && SiteSetting.isbf_library_enabled && category_id.present?
   end
 
   def self.learning_topic?(topic)
@@ -79,9 +75,8 @@ module IsbfLibrary
   def self.ensure_can_submit!(user, guardian)
     category = Category.find_by(id: category_id)
     permitted =
-      enabled? && user&.active? && (user.staff? || user.approved?) &&
-        !user.silenced? && !user.suspended? && category &&
-        guardian.can_create_topic_on_category?(category)
+      enabled? && user&.active? && (user.staff? || user.approved?) && !user.silenced? &&
+        !user.suspended? && category && guardian.can_create_topic_on_category?(category)
     raise Discourse::InvalidAccess unless permitted
   end
 
@@ -97,10 +92,7 @@ module IsbfLibrary
     ensure_can_submit!(user, user.guardian)
     IsbfLearning.ensure_scope_fields!(self, options)
     IsbfLearning.description(options[DESCRIPTION_FIELD.to_sym])
-    IsbfLearning.contributor(
-      options[CONTRIBUTOR_FIELD.to_sym],
-      contributor_user
-    )
+    IsbfLearning.contributor(options[CONTRIBUTOR_FIELD.to_sym], contributor_user)
     if options[STUDENT_NUMBER_FIELD.to_sym].present? ||
          options[CONTRIBUTOR_USER_FIELD.to_sym].present?
       raise Discourse::InvalidAccess unless can_manage?(user.guardian)
@@ -111,26 +103,23 @@ module IsbfLibrary
     raw = options[:raw].to_s
     link = IsbfLearning.external_link(options[LINK_FIELD.to_sym])
     unless group && Catalog.find_category(group["category_id"]) &&
-             options[:category].to_i == category_id &&
-             options[:title].to_s.strip.present? &&
+             options[:category].to_i == category_id && options[:title].to_s.strip.present? &&
              !options[:title].to_s.include?("[isbf-untitled:") &&
-             options[:archetype] != Archetype.private_message &&
-             !options[:isbf_anonymous] &&
-             !raw.match?(%r{(?:upload://|/uploads/|/isbf/learning/files/)}i) &&
-             raw.include?(link)
+             options[:archetype] != Archetype.private_message && !options[:isbf_anonymous] &&
+             !raw.match?(%r{(?:upload://|/uploads/|/isbf/learning/files/)}i) && raw.include?(link)
       raise Discourse::InvalidParameters.new(I18n.t("isbf_library.invalid"))
     end
     [group, ids]
   end
 
   def self.visible_resource?(topic, guardian)
-    unless guardian.user && learning_topic?(topic) && topic.visible &&
-             !topic.deleted_at && guardian.can_see_topic?(topic)
+    unless guardian.user && learning_topic?(topic) && topic.visible && !topic.deleted_at &&
+             guardian.can_see_topic?(topic)
       return false
     end
     post = topic.first_post
-    post && post.post_type == Post.types[:regular] && !post.deleted_at &&
-      !post.user_deleted && !post.hidden? && guardian.can_see_post?(post) &&
+    post && post.post_type == Post.types[:regular] && !post.deleted_at && !post.user_deleted &&
+      !post.hidden? && guardian.can_see_post?(post) &&
       !(defined?(IsbfModeration::Hold) && IsbfModeration::Hold.persisted?(post))
   end
 
@@ -145,8 +134,7 @@ module IsbfLibrary
       id: topic.id,
       title: topic.title,
       url: topic.relative_url,
-      description:
-        IsbfLearning.description(topic.custom_fields[DESCRIPTION_FIELD]),
+      description: IsbfLearning.description(topic.custom_fields[DESCRIPTION_FIELD]),
       created_at: post.created_at,
       category: category,
       group: group,
@@ -158,17 +146,15 @@ module IsbfLibrary
           {
             username: post.user.username,
             name: post.user.name,
-            avatar_template: post.user.avatar_template
+            avatar_template: post.user.avatar_template,
           },
       files: [],
       links: [IsbfLearning.external_link(link)],
-      link_only: true
+      link_only: true,
     }
     if can_manage?(guardian)
       data[:student_number] = topic.custom_fields[STUDENT_NUMBER_FIELD] || ""
-      data[:contributor_user_id] = topic.custom_fields[
-        CONTRIBUTOR_USER_FIELD
-      ].presence&.to_i
+      data[:contributor_user_id] = topic.custom_fields[CONTRIBUTOR_USER_FIELD].presence&.to_i
     end
     data
   end

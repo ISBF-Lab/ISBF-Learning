@@ -6,18 +6,12 @@ require "cgi"
 module IsbfLearning
   def self.can_manage?(guardian)
     guardian.is_admin? ||
-      (
-        guardian.respond_to?(:academy_can?) &&
-          guardian.academy_can?(:manage_resources)
-      )
+      (guardian.respond_to?(:academy_can?) && guardian.academy_can?(:manage_resources))
   end
 
   def self.can_review?(guardian)
     guardian.is_admin? ||
-      (
-        guardian.respond_to?(:academy_can?) &&
-          guardian.academy_can?(:review_resources)
-      )
+      (guardian.respond_to?(:academy_can?) && guardian.academy_can?(:review_resources))
   end
 
   STORE = "isbf-learning"
@@ -38,7 +32,7 @@ module IsbfLearning
     DESCRIPTION_FIELD,
     CONTRIBUTOR_FIELD,
     STUDENT_NUMBER_FIELD,
-    CONTRIBUTOR_USER_FIELD
+    CONTRIBUTOR_USER_FIELD,
   ].freeze
   GRADES = (1..4).map { |id| { id: id, label: %w[大一 大二 大三 大四][id - 1] } }.freeze
   class StorageError < StandardError
@@ -67,9 +61,7 @@ module IsbfLearning
   end
 
   def self.resource_library_for_topic(topic)
-    if topic && !topic.private_message?
-      resource_library_for_category(topic.category_id)
-    end
+    resource_library_for_category(topic.category_id) if topic && !topic.private_message?
   end
 
   def self.ensure_scope_fields!(library, options)
@@ -82,9 +74,7 @@ module IsbfLearning
   def self.reviewable_resource_library(reviewable)
     return unless reviewable.is_a?(ReviewableQueuedPost)
     resource_library_for_category(reviewable.category_id) ||
-      resource_libraries.find do |library|
-        reviewable.payload&.[](library::GROUP_FIELD).present?
-      end
+      resource_libraries.find { |library| reviewable.payload&.[](library::GROUP_FIELD).present? }
   end
 
   def self.learning_topic?(topic)
@@ -94,9 +84,8 @@ module IsbfLearning
   def self.ensure_can_submit!(user, guardian)
     category = Category.find_by(id: category_id)
     permitted =
-      SiteSetting.isbf_learning_enabled && user&.active? &&
-        (user.staff? || user.approved?) && !user.silenced? &&
-        !user.suspended? && category &&
+      SiteSetting.isbf_learning_enabled && user&.active? && (user.staff? || user.approved?) &&
+        !user.silenced? && !user.suspended? && category &&
         guardian.can_create_topic_on_category?(category)
     raise Discourse::InvalidAccess unless permitted
   end
@@ -118,10 +107,7 @@ module IsbfLearning
       .filter_map do |value|
         value = value.sub(/[)\]>.,，。]+\z/, "")
         uri = URI.parse(value)
-        if uri.host.present? && !uri.userinfo &&
-             uri.host != Discourse.current_hostname
-          value
-        end
+        value if uri.host.present? && !uri.userinfo && uri.host != Discourse.current_hostname
       rescue URI::InvalidURIError
         nil
       end
@@ -132,16 +118,12 @@ module IsbfLearning
   def self.external_link(value)
     unless value.is_a?(String) && value.length.between?(1, 2048) &&
              !value.match?(/[\\\s\x00-\x20<>]/)
-      raise Discourse::InvalidParameters.new(
-              I18n.t("isbf_learning.invalid_link")
-            )
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_link"))
     end
     uri = URI.parse(value)
-    if %w[http https].exclude?(uri.scheme&.downcase) || uri.host.blank? ||
-         uri.userinfo || uri.host.casecmp?(Discourse.current_hostname)
-      raise Discourse::InvalidParameters.new(
-              I18n.t("isbf_learning.invalid_link")
-            )
+    if %w[http https].exclude?(uri.scheme&.downcase) || uri.host.blank? || uri.userinfo ||
+         uri.host.casecmp?(Discourse.current_hostname)
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_link"))
     end
     value
   rescue URI::InvalidURIError
@@ -152,22 +134,18 @@ module IsbfLearning
     return "" if value.nil?
     unless value.is_a?(String) && value.length <= DESCRIPTION_LIMIT &&
              !value.match?(/[\x00-\x08\x0b\x0c\x0e-\x1f]/)
-      raise Discourse::InvalidParameters.new(
-              I18n.t("isbf_learning.invalid_description")
-            )
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_description"))
     end
     value.gsub("\r\n", "\n").gsub("\r", "\n").strip
   end
 
   def self.contributor_name(user)
-    user&.name.presence || user&.username.presence ||
-      I18n.t("isbf_learning.unknown_contributor")
+    user&.name.presence || user&.username.presence || I18n.t("isbf_learning.unknown_contributor")
   end
 
   def self.student_number(value)
     return "" if value.nil?
-    unless value.is_a?(String) && value.length <= 64 &&
-             !value.match?(/[\s\p{Cc}]/)
+    unless value.is_a?(String) && value.length <= 64 && !value.match?(/[\s\p{Cc}]/)
       raise Discourse::InvalidParameters.new("student_number")
     end
     value
@@ -175,9 +153,7 @@ module IsbfLearning
 
   def self.contributor_users(number)
     number = student_number(number)
-    if number.blank? || !defined?(DiscourseAcademyRoles::StudentRegistration)
-      return User.none
-    end
+    return User.none if number.blank? || !defined?(DiscourseAcademyRoles::StudentRegistration)
     ids =
       DiscourseAcademyRoles::StudentRegistration
         .where(student_number: number)
@@ -190,12 +166,9 @@ module IsbfLearning
     number = student_number(options[STUDENT_NUMBER_FIELD.to_sym])
     value = options[CONTRIBUTOR_USER_FIELD.to_sym]
     return number, "" if value.nil? || value == ""
-    unless can_manage?(actor.guardian) &&
-             value.to_s.match?(/\A[1-9]\d{0,18}\z/) &&
+    unless can_manage?(actor.guardian) && value.to_s.match?(/\A[1-9]\d{0,18}\z/) &&
              contributor_users(number).exists?(id: value)
-      raise Discourse::InvalidParameters.new(
-              I18n.t("isbf_learning.invalid_contributor_user")
-            )
+      raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_contributor_user"))
     end
     [number, value.to_s]
   end
@@ -206,11 +179,7 @@ module IsbfLearning
     valid =
       value.is_a?(String) && !value.match?(/[\x00-\x1f\x7f]/) &&
         (value.strip.length <= CONTRIBUTOR_LIMIT || value.strip == default)
-    unless valid
-      raise Discourse::InvalidParameters.new(
-              I18n.t("isbf_learning.invalid_contributor")
-            )
-    end
+    raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid_contributor")) unless valid
     value.strip
   end
 
@@ -219,25 +188,17 @@ module IsbfLearning
   end
 
   def self.link_body(title, link, introduction = "")
-    label =
-      CGI.escapeHTML(title).gsub(/[\\\[\]]/) { |character| "\\#{character}" }
+    label = CGI.escapeHTML(title).gsub(/[\\\[\]]/) { |character| "\\#{character}" }
     body = "[#{label}](<#{link}>)"
     return body if introduction.blank?
     plain =
       CGI.escapeHTML(
-        introduction.gsub(/[\\`*_{}\[\]()#+.!|~:\/-]/) do |character|
-          "\\#{character}"
-        end
+        introduction.gsub(/[\\`*_{}\[\]()#+.!|~:\/-]/) { |character| "\\#{character}" },
       )
     "#{body}\n\n#{plain}"
   end
 
-  def self.validate_payload!(
-    user,
-    options,
-    contributor_user: user,
-    allow_existing_files: false
-  )
+  def self.validate_payload!(user, options, contributor_user: user, allow_existing_files: false)
     ensure_can_submit!(user, Guardian.new(user))
     ensure_scope_fields!(self, options)
     description(options[DESCRIPTION_FIELD.to_sym])
@@ -252,28 +213,22 @@ module IsbfLearning
     raw = options[:raw].to_s
     if options[LINK_FIELD.to_sym].present?
       external_link(options[LINK_FIELD.to_sym])
-      unless ids.empty? || allow_existing_files
-        raise Discourse::InvalidParameters.new(FILES_FIELD)
-      end
+      raise Discourse::InvalidParameters.new(FILES_FIELD) unless ids.empty? || allow_existing_files
     end
     if !course || options[:title].to_s.strip.blank? ||
          options[:title].to_s.include?("[isbf-untitled:") ||
-         options[:archetype] == Archetype.private_message ||
-         options[:isbf_anonymous] || raw.match?(%r{(?:upload://|/uploads/)}i) ||
-         (ids.empty? && links(raw).empty?)
+         options[:archetype] == Archetype.private_message || options[:isbf_anonymous] ||
+         raw.match?(%r{(?:upload://|/uploads/)}i) || (ids.empty? && links(raw).empty?)
       raise Discourse::InvalidParameters.new(I18n.t("isbf_learning.invalid"))
     end
     referenced = raw.scan(%r{/isbf/learning/files/([0-9a-f-]{36})}).flatten.uniq
-    unless (referenced - ids).empty?
-      raise Discourse::InvalidParameters.new(FILES_FIELD)
-    end
+    raise Discourse::InvalidParameters.new(FILES_FIELD) unless (referenced - ids).empty?
     ids.each do |id|
       file = Files.metadata(id)
       permitted =
         file &&
           (
-            can_manage?(user.guardian) || can_review?(user.guardian) ||
-              file[:owner_id] == user.id
+            can_manage?(user.guardian) || can_review?(user.guardian) || file[:owner_id] == user.id
           ) && file_accessible?(id, user, Guardian.new(user))
       raise Discourse::InvalidAccess unless permitted
     end
@@ -281,13 +236,13 @@ module IsbfLearning
   end
 
   def self.visible_resource?(topic, guardian)
-    unless guardian.user && learning_topic?(topic) && topic.visible &&
-             !topic.deleted_at && guardian.can_see_topic?(topic)
+    unless guardian.user && learning_topic?(topic) && topic.visible && !topic.deleted_at &&
+             guardian.can_see_topic?(topic)
       return false
     end
     post = topic.first_post
-    post && post.post_type == Post.types[:regular] && !post.deleted_at &&
-      !post.user_deleted && !post.hidden? && guardian.can_see_post?(post) &&
+    post && post.post_type == Post.types[:regular] && !post.deleted_at && !post.user_deleted &&
+      !post.hidden? && guardian.can_see_post?(post) &&
       !(defined?(IsbfModeration::Hold) && IsbfModeration::Hold.persisted?(post))
   end
 
@@ -303,9 +258,7 @@ module IsbfLearning
         .where(topic_custom_fields: { name: FILES_FIELD })
         .where("topic_custom_fields.value LIKE ?", "%#{id}%")
         .distinct
-    if references.exists?
-      return references.any? { |topic| visible_resource?(topic, guardian) }
-    end
+    return references.any? { |topic| visible_resource?(topic, guardian) } if references.exists?
     return false if file[:bound]
     pending =
       ReviewableQueuedPost
@@ -314,8 +267,7 @@ module IsbfLearning
         .where("payload ->> ? LIKE ?", FILES_FIELD, "%#{id}%")
     if pending.exists?
       return(
-        pending.viewable_by(user).exists? ||
-          pending.where(target_created_by_id: user.id).exists?
+        pending.viewable_by(user).exists? || pending.where(target_created_by_id: user.id).exists?
       )
     end
     can_manage?(guardian) || file[:owner_id] == user.id
@@ -347,12 +299,7 @@ module IsbfLearning
           if link || topic.custom_fields[DESCRIPTION_FIELD].present?
             description(topic.custom_fields[DESCRIPTION_FIELD])
           else
-            PrettyText.excerpt(
-              post.cooked,
-              280,
-              strip_links: true,
-              strip_images: true
-            )
+            PrettyText.excerpt(post.cooked, 280, strip_links: true, strip_images: true)
           end
         ),
       created_at: post.created_at,
@@ -366,17 +313,15 @@ module IsbfLearning
           {
             username: post.user.username,
             name: post.user.name,
-            avatar_template: post.user.avatar_template
+            avatar_template: post.user.avatar_template,
           },
       files: files,
       links: link ? [external_link(link)] : links(post.raw),
-      link_only: link.present? && files.empty?
+      link_only: link.present? && files.empty?,
     }
     if can_manage?(guardian)
       data[:student_number] = topic.custom_fields[STUDENT_NUMBER_FIELD] || ""
-      data[:contributor_user_id] = topic.custom_fields[
-        CONTRIBUTOR_USER_FIELD
-      ].presence&.to_i
+      data[:contributor_user_id] = topic.custom_fields[CONTRIBUTOR_USER_FIELD].presence&.to_i
     end
     data
   end
