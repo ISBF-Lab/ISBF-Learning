@@ -138,8 +138,7 @@ module IsbfLibrary
       created_at: post.created_at,
       category: category,
       group: group,
-      contributor:
-        topic.custom_fields[CONTRIBUTOR_FIELD].presence || IsbfLearning.contributor_name(post.user),
+      contributor: topic.custom_fields[CONTRIBUTOR_FIELD].to_s.strip,
       can_delete: can_manage?(guardian) && guardian.can_delete_topic?(topic),
       can_edit: can_manage?(guardian) && guardian.can_edit_post?(post),
       author:
