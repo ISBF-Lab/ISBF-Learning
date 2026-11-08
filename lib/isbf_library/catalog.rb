@@ -75,8 +75,7 @@ module IsbfLibrary
     end
 
     def self.update_directory(user, kind, id, **attributes)
-      IsbfLibrary.ensure_can_submit!(user, user.guardian)
-      raise Discourse::InvalidAccess unless IsbfLibrary.can_manage?(user.guardian)
+      IsbfLearning.ensure_can_manage_catalog!(user, library: IsbfLibrary)
       synchronize do
         values = normalize(kind: kind, **attributes)
         entry = kind == "category" ? find_category(id) : find_group(id)
@@ -101,7 +100,7 @@ module IsbfLibrary
     end
 
     def self.create(user, **attributes)
-      ensure_staff!(user)
+      IsbfLearning.ensure_can_manage_catalog!(user, library: IsbfLibrary, allow_native_staff: true)
       synchronize { add(normalize(**attributes)) }
     end
 

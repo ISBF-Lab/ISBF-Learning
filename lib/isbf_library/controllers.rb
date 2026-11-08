@@ -100,21 +100,13 @@ module IsbfLibrary
     end
 
     def create_directory(kind)
-      IsbfLibrary.ensure_can_submit!(current_user, guardian)
       RateLimiter.new(current_user, "isbf-library-catalog", 10, 1.minute).performed!
       attributes = {
         kind: kind,
         name: params[:name],
         category_id: kind == "group" ? params[:category_id] : nil,
       }
-      if IsbfLibrary.can_manage?(guardian) ||
-           (
-             current_user.staff? &&
-               !(
-                 SiteSetting.respond_to?(:academy_roles_enabled?) &&
-                   SiteSetting.academy_roles_enabled?
-               )
-           )
+      if IsbfLearning.can_create_catalog_entry?(guardian)
         entry = Catalog.create(current_user, **attributes)
         render json: { :success => true, :pending => false, kind => entry }
       else

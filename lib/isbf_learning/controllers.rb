@@ -103,7 +103,7 @@ module IsbfLearning
     end
 
     def create_grade
-      raise Discourse::InvalidAccess unless guardian.is_admin?
+      raise Discourse::InvalidAccess unless IsbfLearning.can_manage_catalog?(guardian)
       RateLimiter.new(
         current_user,
         "isbf-learning-categories",
@@ -174,15 +174,7 @@ module IsbfLearning
         10,
         1.minute
       ).performed!
-      resource_library.ensure_can_submit!(current_user, guardian)
-      if resource_library.can_manage?(guardian) ||
-           (
-             current_user.staff? &&
-               !(
-                 SiteSetting.respond_to?(:academy_roles_enabled?) &&
-                   SiteSetting.academy_roles_enabled?
-               )
-           )
+      if IsbfLearning.can_create_catalog_entry?(guardian)
         course =
           resource_catalog.create(
             current_user,

@@ -9,6 +9,49 @@ module IsbfLearning
       (guardian.respond_to?(:academy_can?) && guardian.academy_can?(:manage_resources))
   end
 
+  def self.can_manage_catalog?(guardian)
+    guardian.is_admin? ||
+      (
+        SiteSetting.respond_to?(:academy_moderators_manage_resource_catalogs?) &&
+          guardian.respond_to?(:academy_can?) && guardian.academy_can?(:manage_resource_catalogs)
+      )
+  end
+
+  def self.native_catalog_staff?(guardian)
+    guardian.is_staff? &&
+      !(SiteSetting.respond_to?(:academy_roles_enabled?) && SiteSetting.academy_roles_enabled?)
+  end
+
+  def self.can_create_catalog_entry?(guardian)
+    can_manage_catalog?(guardian) || native_catalog_staff?(guardian)
+  end
+
+  def self.ensure_can_manage_catalog!(user, library: self, allow_native_staff: false)
+    guardian = user&.guardian
+    raise Discourse::InvalidAccess unless guardian
+
+    if can_manage_catalog?(guardian)
+      category = Category.find_by(id: library.category_id)
+      return if library.enabled? && user.active? && (guardian.is_admin? || user.approved?) &&
+                  !user.silenced? && !user.suspended? && category && guardian.can_see_category?(category)
+    elsif allow_native_staff && native_catalog_staff?(guardian)
+      return library.ensure_can_submit!(user, guardian)
+    end
+
+    raise Discourse::InvalidAccess
+  end
+
+  # Only for topics selected by an authorized directory deletion. The separate
+  # resource permission still applies to standalone topic and post actions.
+  def self.ensure_can_delete_catalog_topic!(guardian, topic)
+    return guardian.ensure_can_delete!(topic) if guardian.is_admin?
+
+    if topic.trashed? || topic.is_category_topic? || Discourse.static_doc_topic_ids.include?(topic.id) ||
+         !guardian.can_see_topic?(topic)
+      raise Discourse::InvalidAccess
+    end
+  end
+
   def self.can_review?(guardian)
     guardian.is_admin? ||
       (guardian.respond_to?(:academy_can?) && guardian.academy_can?(:review_resources))
