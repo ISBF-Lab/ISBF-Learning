@@ -8,8 +8,17 @@ module IsbfLearning
     end
 
     def self.plan(user, kind:, id:)
-      authorize!(user)
-      Courses.synchronize { build_plan(user, selection(kind, id)) }
+      IsbfLearning.ensure_can_manage_catalog!(user)
+      guardian = user.guardian
+      Courses.synchronize do
+        selected = selection(kind, id)
+        unless guardian.is_admin?
+          resources(selected[:courses]).includes(:category).find_each do |topic|
+            IsbfLearning.ensure_can_delete_catalog_topic!(guardian, topic)
+          end
+        end
+        build_plan(user, selected)
+      end
     end
 
     def self.delete(
@@ -20,7 +29,8 @@ module IsbfLearning
       confirmation_count:,
       cascade:
     )
-      authorize!(user)
+      IsbfLearning.ensure_can_manage_catalog!(user)
+      guardian = user.guardian
       Courses.synchronize do
         selected = selection(kind, id)
         plan = build_plan(user, selected)
@@ -35,14 +45,14 @@ module IsbfLearning
           resources(selected[:courses])
             .order(:id)
             .lock
-            .includes(:first_post)
+            .includes(:category, :first_post)
             .to_a
         topics.each do |topic|
-          user.guardian.ensure_can_delete!(topic)
+          IsbfLearning.ensure_can_delete_catalog_topic!(guardian, topic)
           raise StorageError unless topic.first_post
         end
         topics.each do |topic|
-          PostDestroyer.new(user, topic.first_post).destroy
+          PostDestroyer.new(user, topic.first_post, delete_removed_posts_after: 0).destroy
           raise StorageError unless Topic.with_deleted.find(topic.id).deleted_at
         end
 
@@ -76,13 +86,6 @@ module IsbfLearning
           deleted_courses: ids,
           deleted_resources: topics.length
         }
-      end
-    end
-
-    def self.authorize!(user)
-      IsbfLearning.ensure_can_submit!(user, user.guardian)
-      unless IsbfLearning.can_manage?(user.guardian)
-        raise Discourse::InvalidAccess
       end
     end
 
@@ -165,8 +168,7 @@ module IsbfLearning
       Rails.application.message_verifier("isbf-learning-directory-deletion")
     end
 
-    private_class_method :authorize!,
-                         :selection,
+    private_class_method :selection,
                          :resources,
                          :verification_payload,
                          :build_plan,

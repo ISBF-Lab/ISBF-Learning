@@ -7,12 +7,22 @@ module IsbfLibrary
     Changed = IsbfLearning::DirectoryDeletion::Changed
 
     def self.plan(user, kind:, id:)
-      authorize!(user)
-      Catalog.synchronize { build_plan(user, selection(kind, id)) }
+      IsbfLearning.ensure_can_manage_catalog!(user, library: IsbfLibrary)
+      guardian = user.guardian
+      Catalog.synchronize do
+        selected = selection(kind, id)
+        unless guardian.is_admin?
+          resources(selected[:courses]).includes(:category).find_each do |topic|
+            IsbfLearning.ensure_can_delete_catalog_topic!(guardian, topic)
+          end
+        end
+        build_plan(user, selected)
+      end
     end
 
     def self.delete(user, kind:, id:, confirmation_token:, confirmation_count:, cascade:)
-      authorize!(user)
+      IsbfLearning.ensure_can_manage_catalog!(user, library: IsbfLibrary)
+      guardian = user.guardian
       PluginStoreRow.transaction do
         Catalog.synchronize do
           selected = selection(kind, id)
@@ -24,13 +34,13 @@ module IsbfLibrary
               (!plan[:has_children] || cascade == true || cascade == "true")
           raise Changed unless valid_confirmation
 
-          topics = resources(selected[:courses]).order(:id).lock.includes(:first_post).to_a
+          topics = resources(selected[:courses]).order(:id).lock.includes(:category, :first_post).to_a
           topics.each do |topic|
-            user.guardian.ensure_can_delete!(topic)
+            IsbfLearning.ensure_can_delete_catalog_topic!(guardian, topic)
             raise IsbfLearning::StorageError unless topic.first_post
           end
           topics.each do |topic|
-            PostDestroyer.new(user, topic.first_post).destroy
+            PostDestroyer.new(user, topic.first_post, delete_removed_posts_after: 0).destroy
             raise IsbfLearning::StorageError unless Topic.with_deleted.find(topic.id).deleted_at
           end
 
@@ -56,11 +66,6 @@ module IsbfLibrary
           { success: true, deleted_courses: ids, deleted_resources: topics.length }
         end
       end
-    end
-
-    def self.authorize!(user)
-      IsbfLibrary.ensure_can_submit!(user, user.guardian)
-      raise Discourse::InvalidAccess unless IsbfLibrary.can_manage?(user.guardian)
     end
 
     def self.selection(kind, id)
@@ -126,8 +131,7 @@ module IsbfLibrary
       Rails.application.message_verifier("isbf-library-directory-deletion")
     end
 
-    private_class_method :authorize!,
-                         :selection,
+    private_class_method :selection,
                          :resources,
                          :verification_payload,
                          :build_plan,

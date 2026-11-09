@@ -212,25 +212,35 @@ RSpec.describe IsbfLearning::LibraryController, type: :request do
     expect(IsbfLearning::Courses.find(entry["id"])).to be_present
   end
 
-  it "uses the existing moderator management permission and rechecks revocation" do
-    unless defined?(DiscourseAcademyRoles::ModeratorPermissions)
-      skip "Academy integration is not installed"
+  it "allows a catalog cascade and rejects a previously issued plan after revocation" do
+    unless SiteSetting.respond_to?(:academy_moderators_manage_resource_catalogs?)
+      skip "The installed academy plugin does not provide the resource catalog permission"
     end
     SiteSetting.academy_official_group = Fabricate(:group).id
     SiteSetting.academy_official_category = Fabricate(:category).id
     SiteSetting.academy_roles_enabled = true
-    SiteSetting.academy_moderators_manage_resources = true
-    SiteSetting.academy_moderators_review_resources = false
-    entry = course
-    sign_in(moderator)
-    data = plan(entry["id"])
     SiteSetting.academy_moderators_manage_resources = false
-    SiteSetting.academy_moderators_review_resources = true
+    SiteSetting.academy_moderators_manage_resource_catalogs = true
+    SiteSetting.academy_moderators_review_resources = false
+    SiteSetting.delete_removed_posts_after = 24
+    entry = course
+    topic = publish(entry)
+    sign_in(moderator)
+    delete "/isbf/learning/resources/#{topic.id}.json"
+    expect(response.status).to eq(403)
+    data = plan(entry["id"])
+    SiteSetting.academy_moderators_manage_resource_catalogs = false
+    SiteSetting.academy_moderators_manage_resources = true
+    get "/isbf/learning/courses/#{entry["id"]}/deletion-plan.json"
+    expect(response.status).to eq(403)
     destroy(entry["id"], data)
     expect(response.status).to eq(403)
-    SiteSetting.academy_moderators_manage_resources = true
+    expect(topic.reload.deleted_at).to be_nil
+    SiteSetting.academy_moderators_manage_resources = false
+    SiteSetting.academy_moderators_manage_resource_catalogs = true
     destroy(entry["id"], plan(entry["id"]))
     expect(response.status).to eq(200), response.body
+    expect(Topic.with_deleted.find(topic.id).deleted_at).to be_present
   end
 
   it "rolls back resources and catalog together when catalog storage fails" do

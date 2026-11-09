@@ -188,6 +188,8 @@ RSpec.describe "ISBF learning link sharing", type: :request do
   end
 
   it "denies submission when disabled or when the category denies creation" do
+    course
+
     SiteSetting.isbf_learning_enabled = false
     submit_link(member)
     expect(response.status).to eq(404), response.body

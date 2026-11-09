@@ -12,6 +12,8 @@ jobs:
       skip_linting: true
       skip_annotations: true
       core_ref: f18a1985b22e5d4c0a0fffd6f91812105467afdb
+      # The pinned Core requires Ruby 3.4.
+      container: discourse/discourse_test@sha256:94eca5318fed6171264b95204914de76a113c305cebb72d9fa9527e2c4496494
   syntax:
     runs-on: ubuntu-latest
     steps:

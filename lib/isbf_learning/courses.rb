@@ -33,8 +33,7 @@ module IsbfLearning
     end
 
     def self.create_grade(user, name:)
-      raise Discourse::InvalidAccess unless user&.guardian&.is_admin?
-      IsbfLearning.ensure_can_submit!(user, user.guardian)
+      IsbfLearning.ensure_can_manage_catalog!(user)
       synchronize do
         label = normalize_name(name)
         if grades.any? { |grade| grade[:label].casecmp?(label) }
@@ -58,10 +57,7 @@ module IsbfLearning
     end
 
     def self.update(user, id, name:, grade:)
-      IsbfLearning.ensure_can_submit!(user, user.guardian)
-      unless IsbfLearning.can_manage?(user.guardian)
-        raise Discourse::InvalidAccess
-      end
+      IsbfLearning.ensure_can_manage_catalog!(user)
       synchronize do
         attributes = normalize(name: name, grade: grade)
         courses = list(include_deleted: true)
@@ -85,10 +81,7 @@ module IsbfLearning
     end
 
     def self.update_grade(user, id:, name:)
-      IsbfLearning.ensure_can_submit!(user, user.guardian)
-      unless IsbfLearning.can_manage?(user.guardian)
-        raise Discourse::InvalidAccess
-      end
+      IsbfLearning.ensure_can_manage_catalog!(user)
       synchronize do
         attributes = normalize(name: name, grade: id)
         if grades.any? { |grade|
@@ -149,7 +142,7 @@ module IsbfLearning
     end
 
     def self.create(user, name:, grade:)
-      ensure_staff!(user)
+      IsbfLearning.ensure_can_manage_catalog!(user, allow_native_staff: true)
       synchronize { add(normalize(name: name, grade: grade)) }
     end
 
@@ -205,29 +198,12 @@ module IsbfLearning
 
     # Called inside ReviewableIsbfLearningCourse#perform's shared catalog lock.
     def self.approve_locked(user, name:, grade:)
-      ensure_staff!(user, review: true)
-      add(normalize(name: name, grade: grade), reuse_existing: true)
-    end
-
-    def self.ensure_staff!(user, review: false)
       permitted =
-        user &&
-          (
-            if review
-              IsbfLearning.can_review?(user.guardian)
-            else
-              IsbfLearning.can_manage?(user.guardian)
-            end
-          )
-      permitted ||=
-        user&.staff? &&
-          !(
-            SiteSetting.respond_to?(:academy_roles_enabled?) &&
-              SiteSetting.academy_roles_enabled?
-          )
+        user && (IsbfLearning.can_review?(user.guardian) || IsbfLearning.native_catalog_staff?(user.guardian))
       unless permitted && !user.silenced? && !user.suspended?
         raise Discourse::InvalidAccess
       end
+      add(normalize(name: name, grade: grade), reuse_existing: true)
     end
 
     def self.matching(attributes)
@@ -253,6 +229,6 @@ module IsbfLearning
       course.with_indifferent_access
     end
 
-    private_class_method :add, :matching, :ensure_staff!, :normalize_name
+    private_class_method :add, :matching, :normalize_name
   end
 end

@@ -1,6 +1,6 @@
 # ISBF Learning
 
-Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，主题、回复、审核和搜索复用 Discourse。课程按大一至大四归类；staff 可直接添加，普通成员可申请并由 staff 在原生 `/review` 批准或拒绝。已登录成员可以阅读资源并提交材料。所有非管理员（包括版主）的资料提交进入原生审核队列，仅管理员可直接发布、审核、编辑和删除学习资料。课程申请仍使用原有 staff 权限。资料贡献者名称与真实提交账号分别保存，名称不会改变 Topic/Post 作者。
+Discourse 学习资源库插件。课程资源入口为 `/isbf/learning`，资料库入口为 `/isbf/library`。主题、回复、审核和搜索复用 Discourse。课程和分组分别归入各自的上级分类，目录管理、资料管理及审核使用独立权限。符合分类权限的登录成员可以阅读资源或提交材料。资料贡献者名称与真实提交账号分别保存，名称不会改变 Topic/Post 作者。
 
 ## 配置与数据
 
@@ -16,7 +16,7 @@ Discourse 学习资源库插件。课程与资源入口为 `/isbf/learning`，�
 
 2026-10-21：管理员可通过 `POST /isbf/learning/grades`（`name`）新增课程分类，返回 HTTP 201 和 `{success: true, pending: false, grade: {id, label}}`。现有四个分类及课程关联保留，新增分类使用独立递增编号；分类重命名与归档继续沿用现有接口，不复用已归档编号。课程的 `grade` 参数可选择任意有效分类。前台添加入口仅向管理员显示，分类新增接口也在服务端要求管理员；原有课程申请、审核与资料权限不变。
 
-登录后可使用 `GET /isbf/learning/courses` 获取 `{courses: [...]}`。`POST /isbf/learning/courses` 接受 `name` 与 `grade`（1 至 4）：staff 返回 `{success: true, pending: false, course: {...}}`；普通成员返回 `{success: true, pending: true, reviewable_id: ...}`，审批前不写入目录。同一申请人重复提交相同待审核申请复用原记录；拒绝后可重新申请。目录内已有同年级同名课程或非法值返回 422。
+登录后可使用 `GET /isbf/learning/courses` 获取课程与有效上级分类。`POST /isbf/learning/courses` 接受 `name` 与有效分类 ID `grade`。直接新增返回 `{success: true, pending: false, course: {...}}`。符合投稿条件的申请返回 `{success: true, pending: true, reviewable_id: ...}`，审批前不写入目录。同一申请人重复提交相同待审核申请复用原记录，拒绝后可重新申请。目录内已有同分类同名课程或非法值返回 422。
 
 课程申请使用原生 `ReviewableIsbfLearningCourse` 和审核权限，ISBF-UI 通过官方 `registerReviewableComponent` 展示课程及年级。批准和目录写入受同一分布式互斥锁保护，锁覆盖原生审核事务的提交；不同用户申请同一课程时，批准复用已存在课程。写入失败不会批准申请，审核事务失败同时回滚目录。禁言、封禁、未获准及无分类权限的账号不能申请。
 
@@ -56,7 +56,7 @@ LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 
 资料库复用本插件的审核、原生 Topic/Post、搜索及管理员维护权限，入口为 `/isbf/library`。`isbf_learning_enabled` 仍是插件总开关；新增 `isbf_library_enabled` 默认关闭，`isbf_library_category_id` 默认 0，必须配置为不同于课程资源的真实分类 ID。类别权限采用课程资源相同的登录用户规则。目录从空开始，不自动生成示例数据。
 
-`GET/POST /isbf/library/categories` 读取或添加分类（创建参数 `name`）；`GET/POST /isbf/library/groups` 读取或添加分组（创建参数 `name`、`category_id`，该参数是目录分类 UUID，不是 Discourse 分类整数 ID）。目录保存到独立 PluginStore `isbf-library` 的 `categories`、`groups`。staff 直接添加，普通成员通过 `ReviewableIsbfLibraryDirectory` 申请，原生动作 `approve_directory` / `reject_directory` 审核；分组必须关联已批准的分类。同范围同名重复申请去重，审核与 PluginStore 写入使用同一原生数据库事务和目录互斥锁。
+`GET/POST /isbf/library/categories` 读取或添加分类（创建参数 `name`）。`GET/POST /isbf/library/groups` 读取或添加分组（创建参数 `name`、目录分类 UUID `category_id`）。目录保存到独立 PluginStore `isbf-library` 的 `categories`、`groups`。目录管理者可直接新增，符合投稿条件的成员可通过 `ReviewableIsbfLibraryDirectory` 申请，原生动作 `approve_directory` / `reject_directory` 审核。分组必须关联已批准的分类。同范围同名重复申请去重，审核与 PluginStore 写入使用同一原生数据库事务和目录互斥锁。
 
 `GET /isbf/library/resources` 使用 `group_id` 或 `q` 和零起点 `page`；没有筛选时返回空列表。有 `q` 时原生 Search 搜索资料库全部有效分组，与课程资源隔离。`POST` 接受 `group_id`、`title`、`link`、可选 `description` 和 `contributor`。仅分享外部链接，不新增上传接口。返回同样的 `success`、`pending`、`resource`；资料带 `category` 和 `group` 目录信息。资源使用独立 `isbf_library_*` Topic 字段，管理员编辑沿用 `/posts/:id.json` 的顶层 `title` 与首帖字段，删除沿用 `DELETE /isbf/library/resources/:id`。
 
@@ -66,11 +66,11 @@ LOAD_PLUGINS=1 bundle exec rspec plugins/isbf-learning/spec
 
 ## 已部署课程资源权限兼容
 
-课程资源和资料库共用学院权限集成：`can_manage?` 接受 admin 或原有 `academy_can?(:manage_resources)`，`can_review?` 接受 admin 或原有 `academy_can?(:review_resources)`；目录保留学院角色开关关闭时的原生 staff 回退。课程附件的未绑定、待审核及已发布访问规则沿用已部署实现。两个资源库继续使用各自的分类、目录、贡献归属字段和查询范围。
+课程资源和资料库共用学院权限集成。`manage_resources` 管理单份资料，`review_resources` 审核投稿，`manage_resource_catalogs` 负责两个目录的直接新增、改名、移动与删除。开发者可在管理员权限页开启「管理资源目录」（默认关闭）。删除计划及确认均要求当前目录权限。目录删除沿用现有签名计划，包含下属目录和资料时需确认连带移除。学院角色未启用时保留课程及资料库目录原有的原生 staff 新增回退。课程附件的访问规则与两个资源库的分类、目录、贡献归属字段和查询范围沿用现有实现。
 
 ## 课程资源管理与我的贡献
 
-课程资源页面的直接分享、编辑、删除、课程目录编辑及学号关联统一复用既有“校园功能 → 管理学习资源”权限，原生 admin 保留完整权限。审核仍由“审核学习资源”独立控制。普通用户分享入口展示指定 WPS 表单，不再显示直接上传表单；已有原生审核记录及兼容投稿接口保留。
+课程资源页面的资料直接分享、编辑、删除及学号关联沿用「校园功能 → 管理学习资源」权限。开发者保留完整权限，审核由「审核学习资源」控制。普通用户分享入口展示指定 WPS 表单，已有原生审核记录及兼容投稿接口继续可用。
 
 - `GET /isbf/learning/contributions`：按当前会话账号分页读取已发布贡献，参数仅使用零起点 `page`，返回 `resources` 与 `has_more`。显式关联优先于原上传账号，历史无关联资料按首帖真实上传者归属；待审核、已拒绝、隐藏、删除及无课程或分类访问权限的资料不会展示。重新关联和软删除后，下一次查询立即反映变化。
 - `GET /isbf/learning/contributor-users?student_number=...`：仅资源管理者可按学号精确查询已安装学院插件 `StudentRegistration` 中已关联的真实用户。接口不列举全体学号，不返回邀请码或邮箱。无学院插件时返回空列表。
