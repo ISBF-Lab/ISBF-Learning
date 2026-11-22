@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
 module IsbfLibrary
+  def self.ensure_workbench_available!
+    if defined?(::IsbfWorkbenchMaintenance)
+      ::IsbfWorkbenchMaintenance.ensure_available!(:library)
+    end
+  end
+
   def self.can_manage?(guardian)
     IsbfLearning.can_manage?(guardian)
   end
@@ -73,6 +79,7 @@ module IsbfLibrary
   end
 
   def self.ensure_can_submit!(user, guardian)
+    ensure_workbench_available!
     category = Category.find_by(id: category_id)
     permitted =
       enabled? && user&.active? && (user.staff? || user.approved?) && !user.silenced? &&

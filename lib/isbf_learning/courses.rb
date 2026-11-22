@@ -198,6 +198,7 @@ module IsbfLearning
 
     # Called inside ReviewableIsbfLearningCourse#perform's shared catalog lock.
     def self.approve_locked(user, name:, grade:)
+      IsbfLearning.ensure_workbench_available!
       permitted =
         user && (IsbfLearning.can_review?(user.guardian) || IsbfLearning.native_catalog_staff?(user.guardian))
       unless permitted && !user.silenced? && !user.suspended?

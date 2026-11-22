@@ -509,6 +509,7 @@ module IsbfLearning
     end
 
     def check_category
+      resource_library.ensure_workbench_available!
       category = Category.find_by(id: resource_library.category_id)
       unless category && guardian.can_see_category?(category)
         raise Discourse::InvalidAccess
