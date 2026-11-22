@@ -43,6 +43,7 @@ after_initialize do
       add_permitted_post_update_param(field.to_sym) { |_post, _value| }
       PostRevisor.track_topic_field(field.to_sym) do |changes, value|
         next if value.nil?
+        library.ensure_workbench_available!
         unless library.can_manage?(changes.guardian) &&
                  IsbfLearning.resource_library_for_topic(changes.topic) ==
                    library
@@ -180,6 +181,7 @@ after_initialize do
     def revise!(editor, fields, opts = {}, &block)
       library = IsbfLearning.resource_library_for_topic(@post.topic)
       if library && @post.is_first_post?
+        library.ensure_workbench_available!
         unless library.can_manage?(editor.guardian)
           raise Discourse::InvalidAccess
         end
@@ -289,6 +291,7 @@ after_initialize do
       end
     resource = library && manager.args[:topic_id].blank?
     next unless supplied || resource
+    library.ensure_workbench_available! if resource
     begin
       raise Discourse::InvalidParameters.new("resource_library") unless resource
       library.validate_payload!(manager.user, manager.args)
