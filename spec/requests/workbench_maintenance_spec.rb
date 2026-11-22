@@ -6,17 +6,16 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
   fab!(:learning_category, :category)
   fab!(:library_category, :category)
   fab!(:admin)
-  fab!(:member) do
-    Fabricate(:user, active: true, approved: true, refresh_auto_groups: true)
-  end
+  fab!(:member) { Fabricate(:user, active: true, approved: true, refresh_auto_groups: true) }
 
   let(:paused_keys) { Set.new }
 
   around do |example|
     maintenance = Module.new
     paused = paused_keys
+    maintenance.define_singleton_method(:paused?) { |key| paused.include?(key.to_s) }
     maintenance.define_singleton_method(:ensure_available!) do |key|
-      raise Discourse::NotFound if paused.include?(key.to_s)
+      raise Discourse::NotFound if paused?(key)
     end
     stub_const(Object, :IsbfWorkbenchMaintenance, maintenance) { example.run }
   end
@@ -45,12 +44,13 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
 
   let(:library_payload) do
     directory = IsbfLibrary::Catalog.create(admin, kind: "category", name: "Maintenance library")
-    group = IsbfLibrary::Catalog.create(
-      admin,
-      kind: "group",
-      name: "Maintenance references",
-      category_id: directory.fetch("id"),
-    )
+    group =
+      IsbfLibrary::Catalog.create(
+        admin,
+        kind: "group",
+        name: "Maintenance references",
+        category_id: directory.fetch("id"),
+      )
     {
       title: "Library reference available before maintenance",
       raw: "Library reference: https://example.org/library",
@@ -67,7 +67,14 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
       library = library_payload
       selected = paused_key == "learning_resources" ? learning : library
       prefix = paused_key == "learning_resources" ? "/isbf/learning" : "/isbf/library"
-      sibling = paused_key == "learning_resources" ? "/isbf/library/categories.json" : "/isbf/learning/courses.json"
+      sibling =
+        (
+          if paused_key == "learning_resources"
+            "/isbf/library/categories.json"
+          else
+            "/isbf/learning/courses.json"
+          end
+        )
       paused_keys << paused_key
       sign_in(admin)
 
@@ -102,7 +109,13 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
         public_send(method, route)
         expect(response.status).to eq(404), "#{method} #{route}"
       end
-      get paused_key == "learning_resources" ? "/isbf/learning/courses.json" : "/isbf/library/categories.json"
+      get(
+        if paused_key == "learning_resources"
+          "/isbf/learning/courses.json"
+        else
+          "/isbf/library/categories.json"
+        end,
+      )
       expect(response.status).to eq(404), response.body
 
       expect do
@@ -150,10 +163,11 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
       "file:#{id}",
       { name: "course-reference.txt", size: contents.bytesize, owner_id: admin.id, bound: false },
     )
-    payload = learning_payload.merge(
-      raw: "Private course attachment [reference](/isbf/learning/files/#{id})",
-      isbf_learning_files: [id].to_json,
-    )
+    payload =
+      learning_payload.merge(
+        raw: "Private course attachment [reference](/isbf/learning/files/#{id})",
+        isbf_learning_files: [id].to_json,
+      )
     result = NewPostManager.new(admin, payload).perform
     expect(result.success?).to eq(true), result.errors.full_messages.join(", ")
     sign_in(admin)
@@ -177,11 +191,12 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
   end
 
   it "keeps published topics and ordinary forum replies available while both workspaces are paused" do
-    resource_posts = [learning_payload, library_payload].map do |payload|
-      result = NewPostManager.new(admin, payload).perform
-      expect(result.success?).to eq(true), result.errors.full_messages.join(", ")
-      result.post
-    end
+    resource_posts =
+      [learning_payload, library_payload].map do |payload|
+        result = NewPostManager.new(admin, payload).perform
+        expect(result.success?).to eq(true), result.errors.full_messages.join(", ")
+        result.post
+      end
     paused_keys.merge(%w[learning_resources library])
     sign_in(member)
 
@@ -204,7 +219,9 @@ RSpec.describe "Independent workbench resource maintenance", type: :request do
     original = resource_posts.first.raw
     put "/posts/#{resource_posts.first.id}.json",
         params: {
-          post: { raw: "A changed course reference during maintenance." },
+          post: {
+            raw: "A changed course reference during maintenance.",
+          },
         }
     expect(response.status).to eq(404), response.body
     expect(resource_posts.first.reload.raw).to eq(original)

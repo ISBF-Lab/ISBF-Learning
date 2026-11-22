@@ -10,6 +10,7 @@ module IsbfLearning
     wrap_parameters false
     requires_login
     requires_plugin "isbf-learning"
+    prepend_before_action :ensure_workbench_available
     before_action :check_category
     skip_before_action :preload_json, only: :download
     skip_before_action :check_xhr, only: :download
@@ -508,8 +509,11 @@ module IsbfLearning
       request.path.include?("/grades/") ? "grade" : "course"
     end
 
-    def check_category
+    def ensure_workbench_available
       resource_library.ensure_workbench_available!
+    end
+
+    def check_category
       category = Category.find_by(id: resource_library.category_id)
       unless category && guardian.can_see_category?(category)
         raise Discourse::InvalidAccess
